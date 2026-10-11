@@ -72,16 +72,32 @@ jobs:
           persist-credentials: false
 
       - name: Scan the repository
-        id: scan
-        continue-on-error: ${{ inputs.scan == 'report' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.75.0
           scan-type: config
           scan-ref: .
           severity: CRITICAL,HIGH
-          exit-code: "1"
+          format: json
+          output: ${{ runner.temp }}/config-scan.json
+          exit-code: ${{ inputs.scan == 'enforce' && '1' || '0' }}
 
       - name: Report scan findings
-        if: steps.scan.outcome == 'failure'
-        run: echo "::warning::Trivy found high or critical misconfigurations; see the scan step."
+        if: always()
+        shell: bash
+        run: |
+          results="$RUNNER_TEMP/config-scan.json"
+          if [ ! -s "$results" ]; then exit 0; fi
+          count="$(jq '[.Results[]?.Misconfigurations[]?] | length' "$results")"
+          if [ "$count" -eq 0 ]; then
+            echo "No high or critical misconfigurations."
+            exit 0
+          fi
+          {
+            echo "### Misconfiguration scan: ${count} high or critical findings"
+            echo
+            echo "| File | Check | Severity | Finding |"
+            echo "|---|---|---|---|"
+            jq -r '.Results[]? | .Target as $file | .Misconfigurations[]? | "| \($file) | \(.ID) | \(.Severity) | \(.Title) |"' "$results"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::warning::Trivy found ${count} high or critical misconfigurations; see the job summary."

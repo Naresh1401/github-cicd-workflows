@@ -148,17 +148,32 @@ jobs:
           echo "Runs as ${user}"
 
       - name: Scan the image
-        id: scan
         if: inputs.scan != 'off'
-        continue-on-error: ${{ inputs.scan == 'report' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           version: v0.75.0
           image-ref: ${{ env.IMAGE }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          exit-code: "1"
+          format: json
+          output: ${{ runner.temp }}/image-scan.json
+          exit-code: ${{ inputs.scan == 'enforce' && '1' || '0' }}
 
       - name: Report scan findings
-        if: steps.scan.outcome == 'failure'
-        run: echo "::warning::The image has fixable high or critical vulnerabilities; see the scan step."
+        if: always() && inputs.scan != 'off'
+        run: |
+          results="$RUNNER_TEMP/image-scan.json"
+          if [ ! -s "$results" ]; then exit 0; fi
+          count="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$results")"
+          if [ "$count" -eq 0 ]; then
+            echo "No fixable high or critical vulnerabilities."
+            exit 0
+          fi
+          {
+            echo "### Image scan: ${count} fixable high or critical vulnerabilities"
+            echo
+            echo "| Package | Vulnerability | Severity | Installed | Fixed in |"
+            echo "|---|---|---|---|---|"
+            jq -r '.Results[]?.Vulnerabilities[]? | "| \(.PkgName) | \(.VulnerabilityID) | \(.Severity) | \(.InstalledVersion) | \(.FixedVersion // "") |"' "$results"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "::warning::The image has ${count} fixable high or critical vulnerabilities; see the job summary."

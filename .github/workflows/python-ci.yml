@@ -167,11 +167,17 @@ jobs:
         env:
           AUDIT: ${{ inputs.audit }}
         run: |
-          # pip-audit runs in its own environment and checks what the project installed
-          site="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+          # Audit exactly what the project installed, leaving out the interpreter's own pip,
+          # setuptools and wheel, the linter, and packages installed from a path or URL
+          python -m pip freeze --exclude-editable --exclude pip --exclude setuptools --exclude wheel --exclude ruff \
+            | grep -v ' @ ' > "$RUNNER_TEMP/installed.txt" || true
+          if [ ! -s "$RUNNER_TEMP/installed.txt" ]; then
+            echo "No installed packages to audit."
+            exit 0
+          fi
           status=0
-          pipx run --spec pip-audit==2.10.1 pip-audit --path "$site" --skip-editable --progress-spinner off \
-            --format markdown --output "$RUNNER_TEMP/audit.md" || status=$?
+          pipx run --spec pip-audit==2.10.1 pip-audit --requirement "$RUNNER_TEMP/installed.txt" --no-deps --disable-pip \
+            --progress-spinner off --format markdown --output "$RUNNER_TEMP/audit.md" || status=$?
           if [ -s "$RUNNER_TEMP/audit.md" ]; then
             { echo "### Dependency audit"; cat "$RUNNER_TEMP/audit.md"; } >> "$GITHUB_STEP_SUMMARY"
           fi

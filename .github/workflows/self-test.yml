@@ -29,6 +29,9 @@ jobs:
     with:
       working-directory: tests/fixtures/python-package
       python-version: "3.13"
+      lint: check
+      env-vars: |
+        GREETING=Hello
 
   python-no-tests:
     name: Python (no dependencies, no tests)

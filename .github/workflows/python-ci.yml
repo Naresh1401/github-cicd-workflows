@@ -23,10 +23,16 @@ on:
         default: ""
       lint:
         description: >-
-          errors: syntax errors and undefined names only. full: ruff check and ruff format --check
-          with the project's own settings. off: no linting.
+          errors: syntax errors and undefined names only. check: ruff check with the project's own
+          settings. full: ruff check and ruff format --check. off: no linting.
         type: string
         default: errors
+      env-vars:
+        description: >-
+          Environment variables for the install, setup and test steps, one KEY=value per line.
+          Not for secrets: the values appear in the logs.
+        type: string
+        default: ""
       setup-command:
         description: Runs after the install and before the tests, for example to generate test data.
         type: string
@@ -61,7 +67,7 @@ jobs:
           LINT: ${{ inputs.lint }}
           AUDIT: ${{ inputs.audit }}
         run: |
-          case "$LINT" in errors|full|off) ;; *) echo "::error::lint must be errors, full or off (got '$LINT')"; exit 1 ;; esac
+          case "$LINT" in errors|check|full|off) ;; *) echo "::error::lint must be errors, check, full or off (got '$LINT')"; exit 1 ;; esac
           case "$AUDIT" in report|enforce|off) ;; *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;; esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -91,6 +97,20 @@ jobs:
         if: steps.deps.outputs.files == ''
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Set environment variables
+        if: inputs.env-vars != ''
+        env:
+          VARS: ${{ inputs.env-vars }}
+        run: |
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            if [ -z "$line" ]; then continue; fi
+            case "$line" in
+              [A-Za-z_]*=*) echo "$line" >> "$GITHUB_ENV" ;;
+              *) echo "::error::env-vars lines must look like KEY=value (got '${line}')"; exit 1 ;;
+            esac
+          done <<< "$VARS"
 
       - name: Install Ubuntu packages
         if: inputs.apt-packages != ''
@@ -128,9 +148,9 @@ jobs:
         run: |
           # Use the project's own ruff when it has one
           python -m ruff --version >/dev/null 2>&1 || python -m pip install --quiet ruff==0.17.0
-          if [ "$LINT" = full ]; then
+          if [ "$LINT" = full ] || [ "$LINT" = check ]; then
             python -m ruff check --output-format=github .
-            python -m ruff format --check .
+            if [ "$LINT" = full ]; then python -m ruff format --check .; fi
           else
             # Only problems that stop the code from running: syntax errors and undefined names
             python -m ruff check --no-cache --output-format=github --select E9,F63,F7,F82 .

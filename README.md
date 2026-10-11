@@ -64,8 +64,8 @@ versions or build several Dockerfiles.
 The defaults are chosen so that adding the workflows to an existing repository only fails for
 problems that break the code. Stricter checks are one setting away.
 
-- **Linting** (`lint: errors`) only flags syntax errors and undefined names. `lint: full` runs
-  `ruff check` and `ruff format --check` with the project's own ruff settings.
+- **Linting** (`lint: errors`) only flags syntax errors and undefined names. `lint: check` runs
+  `ruff check` with the project's own ruff settings, and `lint: full` adds `ruff format --check`.
 - **Tests** run when the project has test files. A repository without tests gets a notice instead
   of a failure.
 - **Dependency audits and image scans** (`audit: report`, `scan: report`) list findings in the run
@@ -81,7 +81,8 @@ problems that break the code. Stricter checks are one setting away.
 | `working-directory` | `.` | Folder that holds the project |
 | `apt-packages` | | Extra Ubuntu packages, separated by spaces |
 | `install-command` | | Replaces the automatic install of `requirements-dev.txt` or `requirements.txt` plus the package itself |
-| `lint` | `errors` | `errors`, `full` or `off` |
+| `lint` | `errors` | `errors`, `check`, `full` or `off` |
+| `env-vars` | | Environment variables for the install, setup and test steps, one `KEY=value` per line (not for secrets) |
 | `setup-command` | | Runs between the install and the tests, for example to generate test data |
 | `test-command` | | Replaces the automatic `pytest` run |
 | `audit` | `report` | `report`, `enforce` or `off` |

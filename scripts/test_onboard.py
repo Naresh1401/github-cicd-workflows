@@ -1,5 +1,9 @@
+import json
+import subprocess
+
 import yaml
 
+import onboard
 from onboard import plan, quote, render
 
 
@@ -113,3 +117,18 @@ def test_quote_leaves_simple_values_alone():
     assert quote("CS breach/app") == "'CS breach/app'"
     assert quote("3.11") == "'3.11'"
     assert quote("it's") == "'it''s'"
+
+
+def test_payload_is_sent_as_the_request_body(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs.get("input")))
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(onboard.subprocess, "run", fake_run)
+    onboard.gh("-X", "POST", "repos/o/r/issues", payload={"title": "t"})
+    onboard.gh("repos/o/r")
+    (post, body), (get, no_body) = calls
+    assert post[-2:] == ["--input", "-"] and json.loads(body) == {"title": "t"}
+    assert "--input" not in get and no_body is None

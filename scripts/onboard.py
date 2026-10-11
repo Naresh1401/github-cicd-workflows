@@ -38,8 +38,10 @@ VENDORED = re.compile(r"(^|/)(node_modules|venv|\.venv|site-packages|dist|build)
 
 
 def gh(*args, payload=None):
+    # A JSON payload goes in as the request body through stdin
+    command = ["gh", "api", *args, *(["--input", "-"] if payload is not None else [])]
     result = subprocess.run(
-        ["gh", "api", *args],
+        command,
         check=False,
         capture_output=True,
         text=True,

@@ -1,0 +1,6 @@
+.terraform/
+node_modules/
+dist/
+__pycache__/
+*.egg-info/
+.venv/

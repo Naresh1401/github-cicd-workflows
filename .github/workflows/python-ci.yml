@@ -1,0 +1,184 @@
+name: Python CI
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: Python version to run on.
+        type: string
+        default: "3.11"
+      working-directory:
+        description: Folder that holds the Python project, relative to the repository root.
+        type: string
+        default: "."
+      apt-packages:
+        description: Extra Ubuntu packages to install first, separated by spaces.
+        type: string
+        default: ""
+      install-command:
+        description: >-
+          Installs the project and its test dependencies. Empty installs requirements-dev.txt
+          (or requirements.txt), plus the package itself when pyproject.toml or setup.py defines one.
+        type: string
+        default: ""
+      lint:
+        description: >-
+          errors: syntax errors and undefined names only. full: ruff check and ruff format --check
+          with the project's own settings. off: no linting.
+        type: string
+        default: errors
+      setup-command:
+        description: Runs after the install and before the tests, for example to generate test data.
+        type: string
+        default: ""
+      test-command:
+        description: Runs the tests. Empty runs pytest when the project has test files.
+        type: string
+        default: ""
+      audit:
+        description: >-
+          report: list installed packages with known vulnerabilities without failing.
+          enforce: fail on them. off: skip the audit.
+        type: string
+        default: report
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python ${{ inputs.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check inputs
+        working-directory: .
+        env:
+          LINT: ${{ inputs.lint }}
+          AUDIT: ${{ inputs.audit }}
+        run: |
+          case "$LINT" in errors|full|off) ;; *) echo "::error::lint must be errors, full or off (got '$LINT')"; exit 1 ;; esac
+          case "$AUDIT" in report|enforce|off) ;; *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;; esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Find dependency files
+        id: deps
+        env:
+          DIR: ${{ inputs.working-directory }}
+        run: |
+          files="$(find . -maxdepth 1 -type f \( -name 'requirements*.txt' -o -name pyproject.toml -o -name setup.py -o -name setup.cfg \) | sed "s|^\./|${DIR%/}/|" | sort)"
+          {
+            echo "files<<EOF"
+            echo "$files"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.deps.outputs.files != ''
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+          cache-dependency-path: ${{ steps.deps.outputs.files }}
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.deps.outputs.files == ''
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install Ubuntu packages
+        if: inputs.apt-packages != ''
+        env:
+          PACKAGES: ${{ inputs.apt-packages }}
+        run: |
+          sudo apt-get update -q
+          read -r -a packages <<< "$PACKAGES"
+          sudo apt-get install -y -q --no-install-recommends "${packages[@]}"
+
+      - name: Install the project
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+        run: |
+          python -m pip install --upgrade pip
+          if [ -n "$INSTALL_COMMAND" ]; then
+            bash -eo pipefail -c "$INSTALL_COMMAND"
+            exit 0
+          fi
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          elif [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+          # A pyproject.toml that only configures tools is not an installable package
+          if [ -f setup.py ] || { [ -f pyproject.toml ] && grep -q '^\[project\]' pyproject.toml; }; then
+            # Extras that don't exist only produce a warning
+            python -m pip install -e ".[dev,test]"
+          fi
+
+      - name: Lint
+        if: inputs.lint != 'off'
+        env:
+          LINT: ${{ inputs.lint }}
+        run: |
+          # Use the project's own ruff when it has one
+          python -m ruff --version >/dev/null 2>&1 || python -m pip install --quiet ruff==0.17.0
+          if [ "$LINT" = full ]; then
+            python -m ruff check --output-format=github .
+            python -m ruff format --check .
+          else
+            # Only problems that stop the code from running: syntax errors and undefined names
+            python -m ruff check --no-cache --output-format=github --select E9,F63,F7,F82 .
+          fi
+
+      - name: Prepare
+        if: inputs.setup-command != ''
+        env:
+          SETUP_COMMAND: ${{ inputs.setup-command }}
+        run: bash -eo pipefail -c "$SETUP_COMMAND"
+
+      - name: Test
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          if [ -n "$TEST_COMMAND" ]; then
+            exec bash -eo pipefail -c "$TEST_COMMAND"
+          fi
+          if [ -z "$(find . \( -name .git -o -name .venv -o -name venv -o -name node_modules \) -prune -o -type f \( -name 'test_*.py' -o -name '*_test.py' \) -print -quit)" ]; then
+            echo "::notice::No test files found, so no tests ran."
+            exit 0
+          fi
+          python -m pytest --version >/dev/null 2>&1 || python -m pip install --quiet pytest
+          status=0
+          python -m pytest || status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "::notice::pytest found no tests to run."
+            exit 0
+          fi
+          exit "$status"
+
+      - name: Audit dependencies
+        if: inputs.audit != 'off'
+        env:
+          AUDIT: ${{ inputs.audit }}
+        run: |
+          # pip-audit runs in its own environment and checks what the project installed
+          site="$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+          status=0
+          pipx run --spec pip-audit==2.10.1 pip-audit --path "$site" --skip-editable --progress-spinner off \
+            --format markdown --output "$RUNNER_TEMP/audit.md" || status=$?
+          if [ -s "$RUNNER_TEMP/audit.md" ]; then
+            { echo "### Dependency audit"; cat "$RUNNER_TEMP/audit.md"; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$status" -ne 0 ]; then
+            if [ "$AUDIT" = enforce ]; then
+              echo "::error::pip-audit found vulnerable packages or could not finish; see the job summary."
+              exit "$status"
+            fi
+            echo "::warning::pip-audit found vulnerable packages or could not finish; see the job summary."
+          fi

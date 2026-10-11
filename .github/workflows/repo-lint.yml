@@ -1,0 +1,84 @@
+name: Repository lint
+
+on:
+  workflow_call:
+    inputs:
+      workflow-shellcheck:
+        description: Also run shellcheck on the run steps inside GitHub workflows.
+        type: boolean
+        default: false
+      shellcheck-severity:
+        description: Lowest shellcheck severity that fails the build for shell scripts (error, warning, info or style).
+        type: string
+        default: error
+      hadolint-threshold:
+        description: Lowest hadolint severity that fails the build for Dockerfiles (error, warning, info or style).
+        type: string
+        default: error
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Workflows, shell scripts and Dockerfiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check inputs
+        env:
+          SHELLCHECK: ${{ inputs.shellcheck-severity }}
+          HADOLINT: ${{ inputs.hadolint-threshold }}
+        run: |
+          for value in "$SHELLCHECK" "$HADOLINT"; do
+            case "$value" in error|warning|info|style) ;; *) echo "::error::severity must be error, warning, info or style (got '$value')"; exit 1 ;; esac
+          done
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint GitHub workflows (actionlint)
+        env:
+          WORKFLOW_SHELLCHECK: ${{ inputs.workflow-shellcheck }}
+        run: |
+          if [ ! -d .github/workflows ]; then
+            echo "No workflows to lint."
+            exit 0
+          fi
+          args=(-color)
+          # Without shellcheck, only workflow mistakes fail the build (bad syntax, unknown inputs, expressions)
+          if [ "$WORKFLOW_SHELLCHECK" != true ]; then args+=(-shellcheck= -pyflakes=); fi
+          docker run --rm --volume "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12 "${args[@]}"
+
+      - name: Lint shell scripts (shellcheck)
+        env:
+          SEVERITY: ${{ inputs.shellcheck-severity }}
+        run: |
+          mapfile -d '' scripts < <(git ls-files -z -- '*.sh' '*.bash')
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No shell scripts to lint."
+            exit 0
+          fi
+          shellcheck --severity="$SEVERITY" "${scripts[@]}"
+
+      - name: Lint Dockerfiles (hadolint)
+        env:
+          THRESHOLD: ${{ inputs.hadolint-threshold }}
+        run: |
+          mapfile -d '' dockerfiles < <(git ls-files -z -- 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*' '*.Dockerfile')
+          if [ "${#dockerfiles[@]}" -eq 0 ]; then
+            echo "No Dockerfiles to lint."
+            exit 0
+          fi
+          status=0
+          for dockerfile in "${dockerfiles[@]}"; do
+            echo "::group::${dockerfile}"
+            docker run --rm --interactive hadolint/hadolint:v2.15.1 \
+              hadolint --failure-threshold "$THRESHOLD" - < "$dockerfile" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"

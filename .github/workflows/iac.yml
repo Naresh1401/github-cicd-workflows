@@ -1,0 +1,87 @@
+name: Infrastructure as code
+
+on:
+  workflow_call:
+    inputs:
+      directories:
+        description: JSON list of folders with OpenTofu or Terraform code, for example '["infra/gcp", "infra/azure"]'.
+        type: string
+        default: '["."]'
+      tofu-version:
+        description: OpenTofu version.
+        type: string
+        default: "1.13.1"
+      scan:
+        description: >-
+          report: list high and critical misconfigurations in the repository (OpenTofu, Dockerfiles,
+          Kubernetes) without failing. enforce: fail on them. off: skip the scan.
+        type: string
+        default: report
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate ${{ matrix.directory }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        directory: ${{ fromJSON(inputs.directories) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ inputs.tofu-version }}
+          tofu_wrapper: false
+
+      - name: Check formatting
+        run: tofu fmt -check -recursive -diff
+
+      - name: Validate
+        run: |
+          # Respect a committed lockfile instead of quietly updating it
+          lockfile=()
+          if [ -f .terraform.lock.hcl ]; then lockfile=(-lockfile=readonly); fi
+          tofu init -backend=false -input=false "${lockfile[@]}"
+          tofu validate
+
+  misconfiguration:
+    name: Scan for misconfigurations
+    if: inputs.scan != 'off'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check inputs
+        env:
+          SCAN: ${{ inputs.scan }}
+        run: |
+          case "$SCAN" in report|enforce) ;; *) echo "::error::scan must be report, enforce or off (got '$SCAN')"; exit 1 ;; esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan the repository
+        id: scan
+        continue-on-error: ${{ inputs.scan == 'report' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: config
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Report scan findings
+        if: steps.scan.outcome == 'failure'
+        run: echo "::warning::Trivy found high or critical misconfigurations; see the scan step."

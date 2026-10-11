@@ -1,0 +1,73 @@
+name: Self-test
+
+# Runs every reusable workflow against the sample projects in tests/fixtures
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  python-requirements:
+    name: Python (requirements.txt)
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      working-directory: tests/fixtures/python-requirements
+      lint: full
+      audit: enforce
+
+  python-package:
+    name: Python (pyproject package)
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      working-directory: tests/fixtures/python-package
+      python-version: "3.13"
+
+  python-no-tests:
+    name: Python (no dependencies, no tests)
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      working-directory: tests/fixtures/python-no-tests
+
+  node:
+    name: Node
+    strategy:
+      matrix:
+        node-version: ["20", "22"]
+    uses: ./.github/workflows/node-ci.yml
+    with:
+      working-directory: tests/fixtures/node
+      node-version: ${{ matrix.node-version }}
+      audit: enforce
+
+  container:
+    name: Container
+    uses: ./.github/workflows/container.yml
+    with:
+      context: tests/fixtures/container
+      dockerfile: tests/fixtures/container/Dockerfile
+      version-build-arg: APP_VERSION
+      smoke-test: true
+      expect-version: true
+      require-non-root: true
+
+  iac:
+    name: Infrastructure as code
+    uses: ./.github/workflows/iac.yml
+    with:
+      directories: '["tests/fixtures/iac"]'
+
+  repo-lint:
+    name: Repository lint
+    uses: ./.github/workflows/repo-lint.yml
+    with:
+      workflow-shellcheck: true
+      shellcheck-severity: style
+      hadolint-threshold: style

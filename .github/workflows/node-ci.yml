@@ -1,0 +1,167 @@
+name: Node CI
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: Node.js version to run on.
+        type: string
+        default: "22"
+      working-directory:
+        description: Folder that holds package.json, relative to the repository root.
+        type: string
+        default: "."
+      install-command:
+        description: >-
+          Installs dependencies. Empty uses the lockfile: npm ci for package-lock.json,
+          pnpm install --frozen-lockfile for pnpm-lock.yaml, npm install when there is none.
+        type: string
+        default: ""
+      lint-command:
+        description: auto runs the lint script when package.json has one; empty skips linting.
+        type: string
+        default: auto
+      build-command:
+        description: auto runs the build script when package.json has one; empty skips the build.
+        type: string
+        default: auto
+      test-command:
+        description: auto runs the test script when package.json has a real one; empty skips the tests.
+        type: string
+        default: auto
+      audit:
+        description: >-
+          report: list high and critical advisories in production dependencies without failing.
+          enforce: fail on them. off: skip the audit.
+        type: string
+        default: report
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Node ${{ inputs.node-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # pnpm comes through Corepack; let it download without asking
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check inputs
+        working-directory: .
+        env:
+          AUDIT: ${{ inputs.audit }}
+        run: |
+          case "$AUDIT" in report|enforce|off) ;; *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;; esac
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Detect the package manager
+        id: pm
+        env:
+          DIR: ${{ inputs.working-directory }}
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "manager=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f package-lock.json ]; then
+            echo "manager=npm" >> "$GITHUB_OUTPUT"
+            echo "lockfile=${DIR%/}/package-lock.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "manager=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.pm.outputs.lockfile != ''
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ steps.pm.outputs.lockfile }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.pm.outputs.lockfile == ''
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install dependencies
+        env:
+          INSTALL_COMMAND: ${{ inputs.install-command }}
+          MANAGER: ${{ steps.pm.outputs.manager }}
+        run: |
+          if [ -n "$INSTALL_COMMAND" ]; then
+            exec bash -eo pipefail -c "$INSTALL_COMMAND"
+          fi
+          if [ "$MANAGER" = pnpm ]; then
+            # The pnpm version comes from the packageManager field when there is one
+            npm install --global corepack@latest
+            corepack enable pnpm
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Find package scripts
+        id: scripts
+        run: |
+          node -e '
+            const scripts = require("./package.json").scripts || {};
+            const placeholder = /no test specified/;
+            const has = (name) => Boolean(scripts[name]) && !(name === "test" && placeholder.test(scripts[name]));
+            for (const name of ["lint", "build", "test"]) console.log(name + "=" + has(name));
+          ' >> "$GITHUB_OUTPUT"
+
+      - name: Lint
+        if: inputs.lint-command != '' && (inputs.lint-command != 'auto' || steps.scripts.outputs.lint == 'true')
+        env:
+          COMMAND: ${{ inputs.lint-command }}
+          MANAGER: ${{ steps.pm.outputs.manager }}
+        run: |
+          if [ "$COMMAND" = auto ]; then exec "$MANAGER" run lint; fi
+          exec bash -eo pipefail -c "$COMMAND"
+
+      - name: Build
+        if: inputs.build-command != '' && (inputs.build-command != 'auto' || steps.scripts.outputs.build == 'true')
+        env:
+          COMMAND: ${{ inputs.build-command }}
+          MANAGER: ${{ steps.pm.outputs.manager }}
+        run: |
+          if [ "$COMMAND" = auto ]; then exec "$MANAGER" run build; fi
+          exec bash -eo pipefail -c "$COMMAND"
+
+      - name: Test
+        if: inputs.test-command != '' && (inputs.test-command != 'auto' || steps.scripts.outputs.test == 'true')
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          MANAGER: ${{ steps.pm.outputs.manager }}
+        run: |
+          if [ "$COMMAND" = auto ]; then exec "$MANAGER" test; fi
+          exec bash -eo pipefail -c "$COMMAND"
+
+      - name: Audit dependencies
+        if: inputs.audit != 'off'
+        env:
+          AUDIT: ${{ inputs.audit }}
+          MANAGER: ${{ steps.pm.outputs.manager }}
+        run: |
+          status=0
+          if [ "$MANAGER" = pnpm ]; then
+            pnpm audit --prod --audit-level high > "$RUNNER_TEMP/audit.txt" 2>&1 || status=$?
+          else
+            npm audit --omit=dev --audit-level=high > "$RUNNER_TEMP/audit.txt" 2>&1 || status=$?
+          fi
+          if [ "$status" -ne 0 ]; then
+            { echo '### Dependency audit'; echo '```'; tail -n 60 "$RUNNER_TEMP/audit.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$AUDIT" = enforce ]; then
+              echo "::error::The dependency audit found high or critical advisories or could not finish; see the job summary."
+              exit "$status"
+            fi
+            echo "::warning::The dependency audit found high or critical advisories or could not finish; see the job summary."
+          fi

@@ -55,6 +55,16 @@ jobs:
           tofu init -backend=false -input=false "${lockfile[@]}"
           tofu validate
 
+      - name: Test
+        run: |
+          # The folder's own OpenTofu tests (*.tftest.hcl here or in tests/), for example plans
+          # against mock providers that check the configuration without cloud credentials
+          if compgen -G "*.tftest.hcl" > /dev/null || compgen -G "tests/*.tftest.hcl" > /dev/null; then
+            tofu test
+          else
+            echo "No OpenTofu tests in this folder."
+          fi
+
   misconfiguration:
     name: Scan for misconfigurations
     if: inputs.scan != 'off'

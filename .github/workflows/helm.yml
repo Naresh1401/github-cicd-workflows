@@ -35,8 +35,21 @@ on:
         description: Build argument that receives the commit SHA, for example APP_VERSION.
         type: string
         default: ""
+      install-values-files:
+        description: >-
+          Values files for the kind install, one per line, relative to the chart. install-values
+          is applied on top of them.
+        type: string
+        default: ""
       install-values:
         description: Extra settings for the kind install, one key=value per line (passed with --set).
+        type: string
+        default: ""
+      setup-manifests:
+        description: >-
+          Kubernetes manifests to apply to the kind cluster before the chart is installed, for
+          example a database the chart connects to: a file or a folder, relative to the repository
+          root. The install starts once their workloads are ready.
         type: string
         default: ""
       health-path:
@@ -145,13 +158,32 @@ jobs:
           docker build "${args[@]}" --file "$DOCKERFILE" --tag "ci-image:${GITHUB_SHA}" "$CONTEXT"
           kind load docker-image "ci-image:${GITHUB_SHA}" --name ci
 
+      - name: Apply the setup manifests
+        if: inputs.setup-manifests != ''
+        env:
+          MANIFESTS: ${{ inputs.setup-manifests }}
+        run: |
+          kubectl apply --filename "$MANIFESTS"
+          # Wait for every workload in the cluster, the new ones included, to be ready
+          for kind in deployment statefulset daemonset; do
+            kubectl get "$kind" --all-namespaces \
+              --output jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' |
+              while read -r namespace name; do
+                kubectl rollout status "${kind}/${name}" --namespace "$namespace" --timeout 5m
+              done
+          done
+
       - name: Install the chart
         env:
           CHART: ${{ inputs.chart }}
+          INSTALL_VALUES_FILES: ${{ inputs.install-values-files }}
           INSTALL_VALUES: ${{ inputs.install-values }}
           BUILT_IMAGE: ${{ inputs.image-dockerfile != '' }}
         run: |
           args=(--wait --timeout 5m)
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then args+=(--values "${CHART}/${file}"); fi
+          done <<< "$INSTALL_VALUES_FILES"
           if [ "$BUILT_IMAGE" = true ]; then
             args+=(--set image.repository=ci-image --set "image.tag=${GITHUB_SHA}" --set image.pullPolicy=Never)
           fi
@@ -196,3 +228,9 @@ jobs:
           kubectl get all --all-namespaces
           kubectl describe pods
           kubectl get events --sort-by=.lastTimestamp | tail -n 40
+          # Including pods that already finished, such as a hook's Job
+          for pod in $(kubectl get pods --output name); do
+            echo "::group::Logs of ${pod}"
+            kubectl logs "$pod" --all-containers --tail 80 || true
+            echo "::endgroup::"
+          done

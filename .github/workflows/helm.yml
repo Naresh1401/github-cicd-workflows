@@ -11,8 +11,9 @@ on:
         required: true
       values-files:
         description: >-
-          Extra values files, one per line, relative to the chart. Each is linted and validated on
-          top of values.yaml. Empty checks values.yaml alone.
+          Extra values files, one per line, relative to the chart. Each line is linted and
+          validated on top of values.yaml; several files on one line, separated by spaces, are
+          checked together. Empty checks values.yaml alone.
         type: string
         default: ""
       kubernetes-version:
@@ -104,12 +105,13 @@ jobs:
         run: |
           mapfile -t extra < <(printf '%s\n' "$VALUES_FILES" | sed '/^[[:space:]]*$/d')
           status=0
-          for file in "" "${extra[@]}"; do
+          for line in "" "${extra[@]}"; do
             args=()
             label="values.yaml"
-            if [ -n "$file" ]; then
-              args=(--values "${CHART}/${file}")
-              label="values.yaml + ${file}"
+            if [ -n "$line" ]; then
+              read -r -a files <<< "$line"
+              for file in "${files[@]}"; do args+=(--values "${CHART}/${file}"); done
+              label="values.yaml + ${files[*]}"
             fi
             echo "::group::${label}"
             helm lint --strict "$CHART" "${args[@]}" || status=1

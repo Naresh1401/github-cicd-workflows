@@ -135,7 +135,9 @@ problems that break the code. Stricter checks are one setting away.
 | `image-dockerfile` | | Dockerfile of the image to build and load into kind; empty keeps the chart's image |
 | `image-context` | `.` | Build context for that image |
 | `version-build-arg` | | Build argument that receives the commit SHA |
+| `install-values-files` | | Values files for the kind install, one per line, relative to the chart |
 | `install-values` | | Extra `--set` settings for the kind install, one `key=value` per line |
+| `setup-manifests` | | Manifests (file or folder) applied to kind before the install, such as a database the chart needs; the install waits until their workloads are ready |
 | `health-path` | `/health` | Health endpoint behind the chart's Service |
 | `expect-version` | `false` | Require the health response's `version` to equal the commit SHA |
 

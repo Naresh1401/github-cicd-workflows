@@ -1,0 +1,7 @@
+# Applied to the kind cluster before the fixture chart is installed
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fixture-setup
+data:
+  SETUP_APPLIED: "true"

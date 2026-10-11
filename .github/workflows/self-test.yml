@@ -80,8 +80,12 @@ jobs:
     uses: ./.github/workflows/helm.yml
     with:
       chart: tests/fixtures/helm
-      values-files: values-ha.yaml
+      values-files: |
+        values-ha.yaml
+        values-kind.yaml
       kind-test: true
+      setup-manifests: tests/fixtures/kind-setup.yaml
+      install-values-files: values-kind.yaml
       image-dockerfile: tests/fixtures/container/Dockerfile
       image-context: tests/fixtures/container
       version-build-arg: APP_VERSION

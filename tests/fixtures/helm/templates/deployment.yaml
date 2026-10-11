@@ -23,6 +23,12 @@ spec:
         - name: app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.setupConfigMap }}
+          envFrom:
+            # Not optional: the pod only starts if the setup manifests were applied
+            - configMapRef:
+                name: {{ . }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}

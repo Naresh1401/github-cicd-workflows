@@ -1,0 +1,2 @@
+# For the kind test: read the ConfigMap that tests/fixtures/kind-setup.yaml creates
+setupConfigMap: fixture-setup

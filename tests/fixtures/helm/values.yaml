@@ -8,3 +8,6 @@ containerPort: 8000
 
 service:
   port: 80
+
+# A ConfigMap the pods read their environment from; set by values-kind.yaml
+setupConfigMap: ""

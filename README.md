@@ -64,7 +64,7 @@ versions or build several Dockerfiles.
 The defaults are chosen so that adding the workflows to an existing repository only fails for
 problems that break the code. Stricter checks are one setting away.
 
-- **Linting** (`lint: errors`) only flags syntax errors and undefined names. `lint: check` runs
+- **Linting** (`lint: errors`) only flags syntax errors and undefined names, and skips Jupyter notebooks. `lint: check` runs
   `ruff check` with the project's own ruff settings, and `lint: full` adds `ruff format --check`.
 - **Tests** run when the project has test files. A repository without tests gets a notice instead
   of a failure.

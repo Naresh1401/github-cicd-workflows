@@ -10,7 +10,7 @@ between repositories and a fix here reaches all of them.
 | [`python-ci.yml`](.github/workflows/python-ci.yml) | Installs the project, lints with ruff, runs pytest, audits dependencies with pip-audit |
 | [`node-ci.yml`](.github/workflows/node-ci.yml) | Installs with npm or pnpm, runs the lint, build and test scripts, runs a dependency audit |
 | [`container.yml`](.github/workflows/container.yml) | Builds a Docker image, optionally smoke-tests its health endpoint and checks it runs as non-root, scans it with Trivy |
-| [`iac.yml`](.github/workflows/iac.yml) | Runs `tofu fmt` and `tofu validate` for each OpenTofu/Terraform folder, scans the repository for misconfigurations with Trivy |
+| [`iac.yml`](.github/workflows/iac.yml) | Runs `tofu fmt`, `tofu validate` and, where a folder has them, `tofu test` for each OpenTofu/Terraform folder, and scans the repository for misconfigurations with Trivy |
 | [`repo-lint.yml`](.github/workflows/repo-lint.yml) | Lints GitHub workflows (actionlint), shell scripts (shellcheck) and Dockerfiles (hadolint) |
 | [`helm.yml`](.github/workflows/helm.yml) | Lints a Helm chart, validates the rendered manifests against Kubernetes schemas, and optionally installs it on a kind cluster and checks its health endpoint |
 
@@ -120,7 +120,7 @@ problems that break the code. Stricter checks are one setting away.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `directories` | `["."]` | JSON list of OpenTofu/Terraform folders |
+| `directories` | `["."]` | JSON list of OpenTofu/Terraform folders. Each is format-checked and validated, and its tests (`*.tftest.hcl` in the folder or in `tests/`) run with `tofu test` |
 | `tofu-version` | `1.13.1` | OpenTofu version |
 | `scan` | `report` | `report`, `enforce` or `off` (Trivy misconfiguration scan) |
 

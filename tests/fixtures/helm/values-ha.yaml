@@ -1,0 +1,2 @@
+# A second values file, so the self-test checks more than the defaults
+replicaCount: 2

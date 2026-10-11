@@ -1,0 +1,198 @@
+name: Helm
+
+# The kind test expects the chart to take its image from image.repository, image.tag and
+# image.pullPolicy, and to label its Service with app.kubernetes.io/instance (as `helm create` does).
+on:
+  workflow_call:
+    inputs:
+      chart:
+        description: Path to the chart, relative to the repository root.
+        type: string
+        required: true
+      values-files:
+        description: >-
+          Extra values files, one per line, relative to the chart. Each is linted and validated on
+          top of values.yaml. Empty checks values.yaml alone.
+        type: string
+        default: ""
+      kubernetes-version:
+        description: Kubernetes version whose API schemas the rendered manifests are validated against.
+        type: string
+        default: "1.35.0"
+      kind-test:
+        description: Install the chart on a kind cluster, wait for it to become ready and check its health endpoint.
+        type: boolean
+        default: false
+      image-dockerfile:
+        description: For the kind test, the Dockerfile of the image the chart runs. Empty keeps the chart's own image.
+        type: string
+        default: ""
+      image-context:
+        description: Build context for that image.
+        type: string
+        default: "."
+      version-build-arg:
+        description: Build argument that receives the commit SHA, for example APP_VERSION.
+        type: string
+        default: ""
+      install-values:
+        description: Extra settings for the kind install, one key=value per line (passed with --set).
+        type: string
+        default: ""
+      health-path:
+        description: Path of the health endpoint behind the chart's Service.
+        type: string
+        default: /health
+      expect-version:
+        description: Fail unless the health response's "version" field is the commit SHA.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: v4.3.0
+  KUBECONFORM_VERSION: v0.8.0
+  KIND_VERSION: v0.33.0
+
+jobs:
+  validate:
+    name: Lint and validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        run: |
+          cd "$RUNNER_TEMP"
+          base="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}"
+          curl -fsSLO "${base}/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL "${base}/CHECKSUMS" -o kubeconform.checksums
+          grep ' kubeconform-linux-amd64.tar.gz$' kubeconform.checksums | sha256sum --check -
+          tar -xzf kubeconform-linux-amd64.tar.gz kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Lint, render and validate
+        env:
+          CHART: ${{ inputs.chart }}
+          VALUES_FILES: ${{ inputs.values-files }}
+          KUBERNETES_VERSION: ${{ inputs.kubernetes-version }}
+        run: |
+          mapfile -t extra < <(printf '%s\n' "$VALUES_FILES" | sed '/^[[:space:]]*$/d')
+          status=0
+          for file in "" "${extra[@]}"; do
+            args=()
+            label="values.yaml"
+            if [ -n "$file" ]; then
+              args=(--values "${CHART}/${file}")
+              label="values.yaml + ${file}"
+            fi
+            echo "::group::${label}"
+            helm lint --strict "$CHART" "${args[@]}" || status=1
+            if helm template ci "$CHART" "${args[@]}" > "$RUNNER_TEMP/rendered.yaml"; then
+              kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" "$RUNNER_TEMP/rendered.yaml" || status=1
+            else
+              status=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+  kind:
+    name: Install on kind
+    if: inputs.kind-test
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Create a kind cluster
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          version: ${{ env.KIND_VERSION }}
+          cluster_name: ci
+
+      - name: Build the image and load it into the cluster
+        if: inputs.image-dockerfile != ''
+        env:
+          DOCKERFILE: ${{ inputs.image-dockerfile }}
+          CONTEXT: ${{ inputs.image-context }}
+          VERSION_ARG: ${{ inputs.version-build-arg }}
+        run: |
+          args=()
+          if [ -n "$VERSION_ARG" ]; then args=(--build-arg "${VERSION_ARG}=${GITHUB_SHA}"); fi
+          docker build "${args[@]}" --file "$DOCKERFILE" --tag "ci-image:${GITHUB_SHA}" "$CONTEXT"
+          kind load docker-image "ci-image:${GITHUB_SHA}" --name ci
+
+      - name: Install the chart
+        env:
+          CHART: ${{ inputs.chart }}
+          INSTALL_VALUES: ${{ inputs.install-values }}
+          BUILT_IMAGE: ${{ inputs.image-dockerfile != '' }}
+        run: |
+          args=(--wait --timeout 5m)
+          if [ "$BUILT_IMAGE" = true ]; then
+            args+=(--set image.repository=ci-image --set "image.tag=${GITHUB_SHA}" --set image.pullPolicy=Never)
+          fi
+          while IFS= read -r setting; do
+            if [ -n "$setting" ]; then args+=(--set "$setting"); fi
+          done <<< "$INSTALL_VALUES"
+          helm install ci "$CHART" "${args[@]}"
+          kubectl get pods,services --output wide
+
+      - name: Check the health endpoint
+        env:
+          HEALTH_PATH: ${{ inputs.health-path }}
+          EXPECT_VERSION: ${{ inputs.expect-version }}
+        run: |
+          service="$(kubectl get service --selector app.kubernetes.io/instance=ci --output jsonpath='{.items[0].metadata.name}')"
+          port="$(kubectl get service "$service" --output jsonpath='{.spec.ports[0].port}')"
+          kubectl port-forward "service/${service}" "18080:${port}" > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if body="$(curl --fail --silent --max-time 5 "http://127.0.0.1:18080${HEALTH_PATH}")"; then
+              if [ "$EXPECT_VERSION" = true ]; then
+                version="$(jq -r '.version // empty' <<<"$body")"
+                if [ "$version" != "$GITHUB_SHA" ]; then
+                  echo "::error::The release reports version '${version}', expected ${GITHUB_SHA}"
+                  exit 1
+                fi
+              fi
+              echo "Healthy: ${body}"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/port-forward.log"
+          echo "::error::${HEALTH_PATH} did not answer through service/${service}"
+          exit 1
+
+      - name: Run the chart's tests
+        run: helm test ci --logs
+
+      - name: Show the cluster state
+        if: failure()
+        run: |
+          kubectl get all --all-namespaces
+          kubectl describe pods
+          kubectl get events --sort-by=.lastTimestamp | tail -n 40

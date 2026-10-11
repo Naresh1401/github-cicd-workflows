@@ -75,6 +75,18 @@ jobs:
       shellcheck-severity: style
       hadolint-threshold: style
 
+  helm:
+    name: Helm
+    uses: ./.github/workflows/helm.yml
+    with:
+      chart: tests/fixtures/helm
+      values-files: values-ha.yaml
+      kind-test: true
+      image-dockerfile: tests/fixtures/container/Dockerfile
+      image-context: tests/fixtures/container
+      version-build-arg: APP_VERSION
+      expect-version: true
+
   onboarding-script:
     name: Repository check script
     uses: ./.github/workflows/python-ci.yml

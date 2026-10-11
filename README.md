@@ -12,6 +12,7 @@ between repositories and a fix here reaches all of them.
 | [`container.yml`](.github/workflows/container.yml) | Builds a Docker image, optionally smoke-tests its health endpoint and checks it runs as non-root, scans it with Trivy |
 | [`iac.yml`](.github/workflows/iac.yml) | Runs `tofu fmt` and `tofu validate` for each OpenTofu/Terraform folder, scans the repository for misconfigurations with Trivy |
 | [`repo-lint.yml`](.github/workflows/repo-lint.yml) | Lints GitHub workflows (actionlint), shell scripts (shellcheck) and Dockerfiles (hadolint) |
+| [`helm.yml`](.github/workflows/helm.yml) | Lints a Helm chart, validates the rendered manifests against Kubernetes schemas, and optionally installs it on a kind cluster and checks its health endpoint |
 
 ## Using it
 
@@ -122,6 +123,24 @@ problems that break the code. Stricter checks are one setting away.
 | `directories` | `["."]` | JSON list of OpenTofu/Terraform folders |
 | `tofu-version` | `1.13.1` | OpenTofu version |
 | `scan` | `report` | `report`, `enforce` or `off` (Trivy misconfiguration scan) |
+
+## helm.yml
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `chart` | | Path to the chart (required) |
+| `values-files` | | Extra values files, one per line; each is checked on top of `values.yaml` |
+| `kubernetes-version` | `1.35.0` | Kubernetes version the rendered manifests are validated against (kubeconform) |
+| `kind-test` | `false` | Install the chart on a kind cluster, wait for it, check the health endpoint and run `helm test` |
+| `image-dockerfile` | | Dockerfile of the image to build and load into kind; empty keeps the chart's image |
+| `image-context` | `.` | Build context for that image |
+| `version-build-arg` | | Build argument that receives the commit SHA |
+| `install-values` | | Extra `--set` settings for the kind install, one `key=value` per line |
+| `health-path` | `/health` | Health endpoint behind the chart's Service |
+| `expect-version` | `false` | Require the health response's `version` to equal the commit SHA |
+
+For the kind test the chart should take its image from `image.repository`, `image.tag` and
+`image.pullPolicy`, and label its Service with `app.kubernetes.io/instance`, as `helm create` does.
 
 ## repo-lint.yml
 

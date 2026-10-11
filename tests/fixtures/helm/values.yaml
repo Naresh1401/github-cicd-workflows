@@ -1,0 +1,10 @@
+image:
+  repository: fixture
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+containerPort: 8000
+
+service:
+  port: 80

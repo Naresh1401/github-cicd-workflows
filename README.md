@@ -131,6 +131,30 @@ problems that break the code. Stricter checks are one setting away.
 | `shellcheck-severity` | `error` | Lowest shellcheck severity that fails the build |
 | `hadolint-threshold` | `error` | Lowest hadolint severity that fails the build |
 
+## Checking every repository
+
+[`check-repos.yml`](.github/workflows/check-repos.yml) runs every morning and looks for
+repositories that don't call these workflows yet:
+
+- **Repositories with code and no CI** get a pull request that adds `.github/workflows/ci.yml`,
+  built from what the repository contains (Python, Node, Dockerfiles, OpenTofu).
+- **Repositories with their own `ci.yml`** are listed for review and never changed.
+- **Documentation-only repositories** are skipped.
+
+Everything it finds goes into one tracking issue labelled `ci-onboarding`, which closes itself once
+every repository is covered.
+
+The default Actions token can read public repositories but can't open pull requests in other
+repositories. To have the check open them itself, and to include private repositories, add a
+fine-grained personal access token as the repository secret `ONBOARDING_TOKEN`:
+
+- Repository access: all repositories
+- Permissions: Contents, Pull requests, Workflows and Issues: read and write
+
+Without the token, the tracking issue includes the suggested `ci.yml` for each repository instead.
+The logic is in [`scripts/onboard.py`](scripts/onboard.py), with unit tests in
+[`scripts/test_onboard.py`](scripts/test_onboard.py).
+
 ## Public on purpose
 
 Private repositories can call workflows from a public repository, but public repositories can't

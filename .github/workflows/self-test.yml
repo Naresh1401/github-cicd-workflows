@@ -74,3 +74,10 @@ jobs:
       workflow-shellcheck: true
       shellcheck-severity: style
       hadolint-threshold: style
+
+  onboarding-script:
+    name: Repository check script
+    uses: ./.github/workflows/python-ci.yml
+    with:
+      working-directory: scripts
+      lint: full

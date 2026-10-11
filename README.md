@@ -129,7 +129,7 @@ problems that break the code. Stricter checks are one setting away.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `chart` | | Path to the chart (required) |
-| `values-files` | | Extra values files, one per line; each is checked on top of `values.yaml` |
+| `values-files` | | Extra values files, one per line; each line is checked on top of `values.yaml`, and files on the same line (separated by spaces) are checked together |
 | `kubernetes-version` | `1.35.0` | Kubernetes version the rendered manifests are validated against (kubeconform) |
 | `kind-test` | `false` | Install the chart on a kind cluster, wait for it, check the health endpoint and run `helm test` |
 | `image-dockerfile` | | Dockerfile of the image to build and load into kind; empty keeps the chart's image |

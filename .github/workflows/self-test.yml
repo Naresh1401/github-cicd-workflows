@@ -83,6 +83,7 @@ jobs:
       values-files: |
         values-ha.yaml
         values-kind.yaml
+        values-ha.yaml values-kind.yaml
       kind-test: true
       setup-manifests: tests/fixtures/kind-setup.yaml
       install-values-files: values-kind.yaml

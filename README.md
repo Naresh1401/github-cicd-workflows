@@ -1,5 +1,27 @@
 # GitHub CI/CD Workflows
 
+## v2 security and Semantic Versioning
+
+The v2 implementation adds a mandatory security baseline to every reusable CI
+workflow: full-history secret detection, OWASP/GitHub Actions static analysis,
+dependency/infrastructure gates, and application-specific security evidence.
+Read [SECURITY-CHECKLIST.md](SECURITY-CHECKLIST.md) for applicability, negative
+tests, exceptions, existing-repository migration, and limits of automated checks.
+
+This is a **major-version change**. Existing `@v1` consumers remain unchanged.
+After v2 is released, use `@v2`, an immutable exact version such as `@v2.0.0`,
+or a full release commit SHA. Consumers need `.github/security-controls.json`;
+onboarding creates a review-required policy rather than guessing application safety.
+Python/Node audits and container/IaC scans default to `enforce` in v2. The tables
+and examples below describe v2; v1 retains its original advisory defaults.
+
+Release via the **SemVer release** workflow, not a force-pushed exact tag.
+Choose patch/minor/major and start with a dry run. Conventional Commit history
+determines the minimum bump; mandatory policy changes require major. The exact
+default-branch commit must pass the self-test before publication. Exact tags are
+create-only; only the corresponding major alias advances. The workflow library's
+SemVer is independent of each application's version.
+
 Reusable GitHub Actions workflows that run CI for all of my repositories, public and private.
 Each repository calls the workflows it needs with a few lines of YAML. The jobs run inside that
 repository, show up on its pull requests and use its own secrets, so nothing has to be copied
@@ -32,13 +54,13 @@ permissions:
 
 jobs:
   python:
-    uses: Naresh1401/github-cicd-workflows/.github/workflows/python-ci.yml@v1
+    uses: Naresh1401/github-cicd-workflows/.github/workflows/python-ci.yml@v2
 
   container:
-    uses: Naresh1401/github-cicd-workflows/.github/workflows/container.yml@v1
+    uses: Naresh1401/github-cicd-workflows/.github/workflows/container.yml@v2
 
   repo-lint:
-    uses: Naresh1401/github-cicd-workflows/.github/workflows/repo-lint.yml@v1
+    uses: Naresh1401/github-cicd-workflows/.github/workflows/repo-lint.yml@v2
 ```
 
 Settings go under `with:`. For example, a FastAPI service that should prove its image starts and
@@ -46,7 +68,7 @@ reports the commit it was built from:
 
 ```yaml
   container:
-    uses: Naresh1401/github-cicd-workflows/.github/workflows/container.yml@v1
+    uses: Naresh1401/github-cicd-workflows/.github/workflows/container.yml@v2
     with:
       version-build-arg: APP_VERSION
       smoke-test: true
@@ -62,15 +84,16 @@ versions or build several Dockerfiles.
 
 ## Defaults
 
-The defaults are chosen so that adding the workflows to an existing repository only fails for
-problems that break the code. Stricter checks are one setting away.
+The v2 defaults block security findings as well as broken code. Review the migration
+checklist and supply application security evidence before upgrading existing repositories.
 
 - **Linting** (`lint: errors`) only flags syntax errors and undefined names, and skips Jupyter notebooks. `lint: check` runs
   `ruff check` with the project's own ruff settings, and `lint: full` adds `ruff format --check`.
 - **Tests** run when the project has test files. A repository without tests gets a notice instead
   of a failure.
-- **Dependency audits and image scans** (`audit: report`, `scan: report`) list findings in the run
-  without failing it. `enforce` fails the build on them.
+- **Dependency audits and image scans** default to `enforce`. Their legacy
+  `report`/`off` modes remain available for the supplemental language/image scans,
+  but never disable the mandatory history-secret, SAST and filesystem security baseline.
 - **shellcheck and hadolint** fail only on errors. `shellcheck-severity` and `hadolint-threshold`
   raise the bar.
 
@@ -86,7 +109,7 @@ problems that break the code. Stricter checks are one setting away.
 | `env-vars` | | Environment variables for the install, setup and test steps, one `KEY=value` per line (not for secrets) |
 | `setup-command` | | Runs between the install and the tests, for example to generate test data |
 | `test-command` | | Replaces the automatic `pytest` run |
-| `audit` | `report` | `report`, `enforce` or `off` |
+| `audit` | `enforce` | `report`, `enforce` or `off` (supplemental installed-dependency audit) |
 
 ## node-ci.yml
 
@@ -98,7 +121,7 @@ problems that break the code. Stricter checks are one setting away.
 | `lint-command` | `auto` | `auto` runs the `lint` script if there is one; empty skips linting |
 | `build-command` | `auto` | `auto` runs the `build` script if there is one; empty skips the build |
 | `test-command` | `auto` | `auto` runs the `test` script if there is a real one; empty skips the tests |
-| `audit` | `report` | `report`, `enforce` or `off` (production dependencies, high and critical) |
+| `audit` | `enforce` | `report`, `enforce` or `off` (production dependencies, high and critical) |
 
 ## container.yml
 
@@ -114,7 +137,7 @@ problems that break the code. Stricter checks are one setting away.
 | `expect-version` | `false` | Require the health response's `version` to equal the commit SHA |
 | `container-env` | | Environment variables for the smoke test, one `KEY=value` per line |
 | `require-non-root` | `false` | Fail when the image runs as root |
-| `scan` | `report` | `report`, `enforce` or `off` (fixable high and critical vulnerabilities) |
+| `scan` | `enforce` | `report`, `enforce` or `off` (high and critical image vulnerabilities, including unfixed) |
 
 ## iac.yml
 
@@ -122,7 +145,7 @@ problems that break the code. Stricter checks are one setting away.
 |-------|---------|-------------|
 | `directories` | `["."]` | JSON list of OpenTofu/Terraform folders. Each is format-checked and validated, and its tests (`*.tftest.hcl` in the folder or in `tests/`) run with `tofu test` |
 | `tofu-version` | `1.13.1` | OpenTofu version |
-| `scan` | `report` | `report`, `enforce` or `off` (Trivy misconfiguration scan) |
+| `scan` | `enforce` | `report`, `enforce` or `off` (Trivy misconfiguration scan) |
 
 ## helm.yml
 
@@ -162,6 +185,12 @@ repositories that don't call these workflows yet:
 - **Repositories with their own `ci.yml`** are listed for review and never changed.
 - **Documentation-only repositories** are skipped.
 
+The v2 onboarding implementation also identifies actual v1 consumers and proposes
+a separate security workflow and review-required controls without replacing their
+existing CI. Automatic PR creation waits for the `v2` release tag to exist.
+Private repositories are omitted when the tracking host is public; use a private
+host for private onboarding so metadata is not exposed in public issues/logs.
+
 Everything it finds goes into one tracking issue labelled `ci-onboarding`, which closes itself once
 every repository is covered.
 
@@ -184,14 +213,14 @@ use it. It holds no secrets: each calling repository keeps its own.
 
 ## Versioning
 
-Repositories call `@v1`. Backwards-compatible changes move the `v1` tag; a breaking change gets
-`v2`, so nothing changes under a repository until it opts in. Third-party actions are pinned to
+Repositories call `@v2` after adopting its security policy. Backwards-compatible changes move the `v2`
+alias; a breaking change gets `v3`, so nothing changes under a repository until it opts in. Third-party actions are pinned to
 commit SHAs, and Dependabot keeps them current.
 
 To release a change after it is merged:
 
 ```bash
-git tag -f v1 && git push -f origin v1
+gh workflow run release.yml -f bump=major -f dry-run=true
 ```
 
 ## Testing

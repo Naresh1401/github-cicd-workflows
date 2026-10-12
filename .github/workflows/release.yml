@@ -1,0 +1,50 @@
+name: SemVer release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Compatible fix=patch, optional feature=minor, breaking policy/API=major.
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      dry-run:
+        description: Validate the release without publishing or moving tags.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: semver-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    uses: ./.github/workflows/self-test.yml
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish the validated default-branch commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUMP: ${{ inputs.bump }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          args=(--bump "$BUMP")
+          if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+          python3 scripts/release.py "${args[@]}"

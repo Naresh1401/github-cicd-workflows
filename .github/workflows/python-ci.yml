@@ -46,13 +46,17 @@ on:
           report: list installed packages with known vulnerabilities without failing.
           enforce: fail on them. off: skip the audit.
         type: string
-        default: report
+        default: enforce
 
 permissions:
   contents: read
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+
   python:
+    needs: security
     name: Python ${{ inputs.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -67,8 +71,14 @@ jobs:
           LINT: ${{ inputs.lint }}
           AUDIT: ${{ inputs.audit }}
         run: |
-          case "$LINT" in errors|check|full|off) ;; *) echo "::error::lint must be errors, check, full or off (got '$LINT')"; exit 1 ;; esac
-          case "$AUDIT" in report|enforce|off) ;; *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;; esac
+          case "$LINT" in
+            errors|check|full|off) ;;
+            *) echo "::error::lint must be errors, check, full or off (got '$LINT')"; exit 1 ;;
+          esac
+          case "$AUDIT" in
+            report|enforce|off) ;;
+            *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -191,7 +201,8 @@ jobs:
           # Audit exactly what the project installed, leaving out the interpreter's own pip,
           # setuptools and wheel, the linter, and packages installed from a path or URL
           python -m pip freeze --exclude-editable --exclude pip --exclude setuptools --exclude wheel --exclude ruff \
-            | grep -v ' @ ' > "$RUNNER_TEMP/installed.txt" || true
+            > "$RUNNER_TEMP/frozen.txt"
+          grep -v ' @ ' "$RUNNER_TEMP/frozen.txt" > "$RUNNER_TEMP/installed.txt" || [ "$?" -eq 1 ]
           if [ ! -s "$RUNNER_TEMP/installed.txt" ]; then
             echo "No installed packages to audit."
             exit 0

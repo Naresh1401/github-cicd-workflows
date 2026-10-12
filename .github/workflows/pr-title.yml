@@ -1,0 +1,27 @@
+name: Release compatibility
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Conventional Commit release intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate release intent
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          node -e '
+            const title = process.env.PR_TITLE;
+            const conventional = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([A-Za-z0-9._/-]+\))?!?: .+/;
+            if (!conventional.test(title)) {
+              console.error("::error::Use a Conventional Commit PR title; add ! for breaking workflow/security changes.");
+              process.exit(1);
+            }
+          '

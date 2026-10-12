@@ -114,6 +114,7 @@ jobs:
           printf '[extend]\nuseDefault = true\n' > gitleaks.toml
           echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
           pipx install semgrep==1.180.0
+          pipx install zizmor==1.30.1
 
       - name: Detect secrets in the complete Git history
         if: ${{ !cancelled() }}
@@ -133,10 +134,57 @@ jobs:
             echo "::error::Repository-wide SAST suppressions are not accepted by the mandatory baseline."
             exit 1
           fi
-          semgrep scan --config p/owasp-top-ten --config p/secrets --config p/github-actions \
+          # Override Semgrep's built-in test-directory exclusions; scan application tests too.
+          : > .semgrepignore
+          semgrep scan --config p/owasp-top-ten --config p/secrets \
             --metrics=off --disable-version-check --oss-only --disable-nosem \
+            --exclude .git --exclude node_modules --exclude .venv --exclude venv \
+            --exclude '**/templates/*.yaml' --exclude '**/templates/*.yml' \
             --no-git-ignore --severity ERROR --error --strict \
             --sarif --output "$RUNNER_TEMP/security-reports/sast.sarif" .
+
+      - name: GitHub Actions security
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d .github/workflows ]; then
+            zizmor --offline --no-config --no-ignores --no-progress \
+              --min-severity high --min-confidence high --format sarif \
+              .github/workflows > "$RUNNER_TEMP/security-reports/workflows.sarif"
+          else
+            echo "::notice::No GitHub workflows to analyze."
+          fi
+
+      - name: Verify secret and injection detectors reject seeded cases
+        if: github.repository == 'Naresh1401/github-cicd-workflows' && !cancelled()
+        run: |
+          probe="$RUNNER_TEMP/scanner-probes"
+          mkdir -p "$probe"
+          printf 'api_token = "ghp_%s"\n' "$(openssl rand -hex 18)" > "$probe/secret.txt"
+          status=0
+          gitleaks dir "$probe" --redact --ignore-gitleaks-allow \
+            --config "$RUNNER_TEMP/security-tools/gitleaks.toml" > "$RUNNER_TEMP/probe-secrets.log" 2>&1 || status=$?
+          if [ "$status" -ne 1 ]; then
+            echo "::error::Secret scanner did not reject the seeded credential (exit $status)."
+            exit 1
+          fi
+          cat > "$probe/injection.py" <<'PY'
+          from flask import request
+          import sqlite3
+          def unsafe_query():
+              connection = sqlite3.connect(":memory:")
+              return connection.execute("SELECT * FROM users WHERE name = '" + request.args["name"] + "'")
+          PY
+          status=0
+          semgrep scan --config p/owasp-top-ten --metrics=off --disable-version-check \
+            --oss-only --severity ERROR --error --strict "$probe/injection.py" \
+            > "$RUNNER_TEMP/probe-sast.log" 2>&1 || status=$?
+          if [ "$status" -ne 1 ]; then
+            cat "$RUNNER_TEMP/probe-sast.log"
+            echo "::error::SAST did not reject the seeded SQL injection (exit $status)."
+            exit 1
+          fi
+          rm "$probe/secret.txt" "$probe/injection.py"
+          echo "Both seeded negative cases were rejected."
 
       - name: Dependencies and infrastructure security
         if: ${{ !cancelled() }}

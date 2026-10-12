@@ -11,7 +11,7 @@ not change repositories pinned to v1 or to older SHAs.
 | Gate | Enforcement |
 |---|---|
 | Secrets | Gitleaks scans complete reachable Git history, including local secrets, API tokens and private keys. Findings are redacted. Rotate leaked credentials; deleting the latest copy does not resolve a historical leak. |
-| Static analysis | Semgrep OSS runs OWASP Top Ten, secrets and GitHub Actions rules locally. ERROR findings block. Lower-severity application risks still require review/tests. Metrics and version checks are disabled; source is not uploaded to a scanning service. Public rule packs are downloaded and can evolve. |
+| Static analysis | Semgrep OSS runs OWASP Top Ten and secrets rules locally. ERROR findings block. Zizmor audits GitHub Actions offline and blocks high-severity/high-confidence findings. Lower-severity application risks still require review/tests. Metrics and version checks are disabled; source is not uploaded to a scanning service. Public rule packs are downloaded and can evolve. |
 | Dependencies/configuration | Trivy blocks HIGH/CRITICAL dependencies and infrastructure misconfigurations, including findings without a fix. Scanner/network errors fail rather than being interpreted as clean. |
 | Runtime dependencies/images | Python and Node dependency audits, container scans and IaC scans default to enforce in v2. Their legacy report/off inputs do not disable the mandatory baseline. |
 | Security evidence | Every control below has a reviewed applicability decision. Applicable controls require existing negative-test files and a successful test command. |
@@ -22,6 +22,11 @@ correct. Transitive dependencies require supported lockfiles or the language
 workflow's installed-dependency audit. Private package access and scanner language
 support must be validated by the consuming repository. No audit claims complete
 coverage of unsupported frameworks, dynamic behavior, or private applications.
+Helm template YAML is excluded from Semgrep's YAML parser because it is not valid
+plain YAML; the Helm workflow renders, validates and tests it, and history-secret
+scanning still covers it. Test directories are not silently excluded from SAST.
+The library self-test proves that the installed secret/SAST engines reject seeded
+credentials and SQL injection, rather than merely checking successful tool startup.
 
 ## Application controls
 

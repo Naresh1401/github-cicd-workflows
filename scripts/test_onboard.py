@@ -1,9 +1,10 @@
 import json
 import subprocess
 
-import onboard
 import pytest
 import yaml
+
+import onboard
 from onboard import plan, quote, render
 
 

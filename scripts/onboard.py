@@ -364,9 +364,7 @@ def render(jobs, branch):
         lines.append("")
     if "iac" in jobs:
         if any(
-            ord(character) < 32
-            for directory in jobs["iac"]
-            for character in directory
+            ord(character) < 32 for directory in jobs["iac"] for character in directory
         ):
             raise RuntimeError("Workflow paths must not contain control characters")
         dirs = quote(json.dumps(jobs["iac"]))
@@ -431,8 +429,7 @@ def inspect(owner, repo):
         )
     shared = [call for call in calls if call.startswith(WORKFLOWS + "/")]
     secured = any(
-        re.search(r"@v(?:[2-9]|[1-9]\d+)(?:\.\d+\.\d+)?$", call)
-        for call in shared
+        re.search(r"@v(?:[2-9]|[1-9]\d+)(?:\.\d+\.\d+)?$", call) for call in shared
     )
     if secured and ".github/security-controls.json" in paths:
         return "covered", None

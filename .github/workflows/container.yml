@@ -173,14 +173,14 @@ jobs:
           if [ ! -s "$results" ]; then exit 0; fi
           count="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$results")"
           if [ "$count" -eq 0 ]; then
-            echo "No fixable high or critical vulnerabilities."
+            echo "No high or critical vulnerabilities."
             exit 0
           fi
           {
-            echo "### Image scan: ${count} fixable high or critical vulnerabilities"
+            echo "### Image scan: ${count} high or critical vulnerabilities"
             echo
             echo "| Package | Vulnerability | Severity | Installed | Fixed in |"
             echo "|---|---|---|---|---|"
             jq -r '.Results[]?.Vulnerabilities[]? | "| \(.PkgName) | \(.VulnerabilityID) | \(.Severity) | \(.InstalledVersion) | \(.FixedVersion // "") |"' "$results"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "::warning::The image has ${count} fixable high or critical vulnerabilities; see the job summary."
+          echo "::warning::The image has ${count} high or critical vulnerabilities; see the job summary."

@@ -1,10 +1,9 @@
 import json
 import subprocess
 
-import yaml
-import pytest
-
 import onboard
+import pytest
+import yaml
 from onboard import plan, quote, render
 
 
@@ -145,6 +144,8 @@ def test_workflow_paths_cannot_inject_yaml():
     with pytest.raises(RuntimeError, match="control characters"):
         render({"iac": ["infra/x\ninjected: true"]}, "main")
     assert yaml.safe_load("branch: " + quote("on"))["branch"] == "on"
+    with pytest.raises(RuntimeError, match="GitHub expressions"):
+        render({"iac": ["infra/${{ github.token }}"]}, "main")
 
 
 def test_comment_is_not_a_shared_workflow_call(monkeypatch):
@@ -220,3 +221,10 @@ def test_public_repository_listing_does_not_need_tracker_metadata(monkeypatch):
         ),
     )
     assert onboard.list_repos("o", False)[0]["name"] == "r"
+
+
+@pytest.mark.parametrize(
+    "path", ["src/main.rs", "main.go", "app/Main.java", "Chart.yaml"]
+)
+def test_other_language_and_helm_repositories_receive_security(path):
+    assert jobs_for([path]) == {"security-only": True}

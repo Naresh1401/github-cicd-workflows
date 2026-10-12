@@ -1,5 +1,4 @@
 import pytest
-
 from release import next_version, parse_version, publish, required_bump
 
 

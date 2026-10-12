@@ -1,9 +1,9 @@
 import copy
 import datetime
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
@@ -23,7 +23,11 @@ def validate(tmp_path, policy):
     path.mkdir(exist_ok=True)
     (path / "security-controls.json").write_text(json.dumps(policy))
     return subprocess.run(
-        [sys.executable, "-c", VALIDATOR], cwd=tmp_path, capture_output=True, text=True
+        [sys.executable, "-c", VALIDATOR],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -33,7 +37,11 @@ def test_tooling_repository_policy_passes(tmp_path):
 
 def test_missing_policy_fails(tmp_path):
     result = subprocess.run(
-        [sys.executable, "-c", VALIDATOR], cwd=tmp_path, capture_output=True, text=True
+        [sys.executable, "-c", VALIDATOR],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert "::error::" in result.stdout

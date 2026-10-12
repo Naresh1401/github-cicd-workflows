@@ -123,8 +123,10 @@ def compose_contexts(files):
             continue
         try:
             services = (yaml.safe_load(text) or {}).get("services") or {}
-        except yaml.YAMLError:
-            continue
+        except yaml.YAMLError as error:
+            raise RuntimeError(f"Invalid Compose YAML in {path}") from error
+        if not isinstance(services, dict):
+            raise TypeError(f"Compose services in {path} must be a mapping")
         for service in services.values():
             build = (service or {}).get("build")
             if isinstance(build, str):
@@ -210,6 +212,36 @@ def plan(paths, files):
     )
     if tf_dirs:
         jobs["iac"] = tf_dirs
+    if not jobs and any(
+        p.endswith(
+            (
+                ".rs",
+                ".go",
+                ".java",
+                ".cs",
+                ".rb",
+                ".php",
+                ".sh",
+                ".bash",
+                ".ts",
+                ".js",
+                ".jsx",
+                ".tsx",
+                ".vue",
+                ".svelte",
+                ".swift",
+                ".kt",
+                ".scala",
+                ".c",
+                ".h",
+                ".cpp",
+                ".ex",
+            )
+        )
+        or posixpath.basename(p) == "Chart.yaml"
+        for p in code
+    ):
+        jobs["security-only"] = True
     return jobs
 
 
@@ -219,6 +251,8 @@ def quote(value):
         raise RuntimeError(
             "Workflow paths and branch names must not contain control characters"
         )
+    if "${{" in value:
+        raise RuntimeError("Workflow paths must not contain GitHub expressions")
     if (
         re.fullmatch(r"[A-Za-z0-9_./-]+", value)
         and not re.fullmatch(r"[\d.]+", value)
@@ -354,6 +388,8 @@ def render(jobs, branch):
 
 def describe(jobs):
     parts = []
+    if jobs.get("security-only"):
+        return "mandatory security baseline"
     if "python" in jobs:
         parts.append("Python")
     if "node" in jobs:
@@ -384,10 +420,10 @@ def inspect(owner, repo):
         except yaml.YAMLError as error:
             raise RuntimeError(f"Invalid workflow YAML in {path}") from error
         if not isinstance(workflow, dict):
-            raise RuntimeError(f"Workflow {path} must be a mapping")
+            raise TypeError(f"Workflow {path} must be a mapping")
         jobs = workflow.get("jobs", {})
         if not isinstance(jobs, dict):
-            raise RuntimeError(f"Workflow {path} jobs must be a mapping")
+            raise TypeError(f"Workflow {path} jobs must be a mapping")
         calls.extend(
             job.get("uses", "")
             for job in jobs.values()
@@ -505,13 +541,34 @@ def open_pr(owner, repo, jobs):
 
 
 def policy_template(owner):
-    controls = (
-        "sql-injection xss csrf ssrf file-uploads path-traversal deserialization "
-        "authentication object-authorization server-permissions tenant-isolation "
-        "rate-limiting password-storage mfa sessions jwt row-level-security secrets "
-        "default-credentials cors webhook-signatures source-maps sensitive-data "
-        "cryptography security-headers resource-limits"
-    ).split()
+    controls = [
+        "sql-injection",
+        "xss",
+        "csrf",
+        "ssrf",
+        "file-uploads",
+        "path-traversal",
+        "deserialization",
+        "authentication",
+        "object-authorization",
+        "server-permissions",
+        "tenant-isolation",
+        "rate-limiting",
+        "password-storage",
+        "mfa",
+        "sessions",
+        "jwt",
+        "row-level-security",
+        "secrets",
+        "default-credentials",
+        "cors",
+        "webhook-signatures",
+        "source-maps",
+        "sensitive-data",
+        "cryptography",
+        "security-headers",
+        "resource-limits",
+    ]
     return (
         json.dumps(
             {
@@ -642,7 +699,7 @@ def main():
             pr_url = None
             if status == "missing" and open_prs and os.environ.get("DRY_RUN") != "true":
                 pr_url = open_pr(owner, repo, jobs)
-        except RuntimeError as error:
+        except (RuntimeError, TypeError) as error:
             failed.append((repo["name"], str(error)[:160]))
             status = "failed"
         counts[status] = counts.get(status, 0) + 1

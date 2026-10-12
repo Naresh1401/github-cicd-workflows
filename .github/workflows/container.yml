@@ -48,13 +48,17 @@ on:
           report: list fixable high and critical vulnerabilities in the image without failing.
           enforce: fail on them. off: skip the scan.
         type: string
-        default: report
+        default: enforce
 
 permissions:
   contents: read
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+
   image:
+    needs: security
     name: Build ${{ inputs.dockerfile }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -154,7 +158,7 @@ jobs:
           version: v0.75.0
           image-ref: ${{ env.IMAGE }}
           severity: CRITICAL,HIGH
-          ignore-unfixed: true
+          ignore-unfixed: false
           format: json
           output: ${{ runner.temp }}/image-scan.json
           exit-code: ${{ inputs.scan == 'enforce' && '1' || '0' }}

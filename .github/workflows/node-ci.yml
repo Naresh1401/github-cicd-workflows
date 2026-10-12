@@ -34,13 +34,17 @@ on:
           report: list high and critical advisories in production dependencies without failing.
           enforce: fail on them. off: skip the audit.
         type: string
-        default: report
+        default: enforce
 
 permissions:
   contents: read
 
 jobs:
+  security:
+    uses: ./.github/workflows/security.yml
+
   node:
+    needs: security
     name: Node ${{ inputs.node-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -99,7 +103,17 @@ jobs:
           fi
           if [ "$MANAGER" = pnpm ]; then
             # The pnpm version comes from the packageManager field when there is one
-            npm install --global corepack@latest
+            curl --fail --silent --show-error --location \
+              https://registry.npmjs.org/corepack/-/corepack-0.34.6.tgz \
+              --output "$RUNNER_TEMP/corepack.tgz"
+            node -e '
+              const fs = require("node:fs");
+              const crypto = require("node:crypto");
+              const expected = "gvylq9kzJB09mSsiOnKOnhg0YdCWNy2aGaeGbYF4HlyGd/v4moxEonQjJPYI45/K4zP7q1hW9qCVvaYYKK5nkA==";
+              const actual = crypto.createHash("sha512").update(fs.readFileSync(process.argv[1])).digest("base64");
+              if (actual !== expected) throw new Error("Corepack integrity verification failed");
+            ' "$RUNNER_TEMP/corepack.tgz"
+            npm install --global --ignore-scripts "$RUNNER_TEMP/corepack.tgz"
             corepack enable pnpm
             pnpm install --frozen-lockfile
           elif [ -f package-lock.json ]; then

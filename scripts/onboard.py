@@ -25,6 +25,7 @@ import yaml
 
 WORKFLOWS = "Naresh1401/github-cicd-workflows/.github/workflows"
 SHARED_MARKER = "github-cicd-workflows/.github/workflows/"
+WORKFLOW_REF = "v2"
 BRANCH = "ci/shared-workflows"
 ISSUE_TITLE = "Repositories without the shared CI"
 ISSUE_LABEL = "ci-onboarding"
@@ -73,11 +74,19 @@ def list_repos(owner, include_private):
         for line in gh("--paginate", path, "--jq", jq).splitlines()
         if line
     ]
+    public_tracker = not gh_json(f"repos/{this_repo}")["private"]
+    if public_tracker:
+        private_count = sum(repo["private"] for repo in repos)
+        repos = [repo for repo in repos if not repo["private"]]
+        if private_count:
+            print(f"{private_count} private repositories omitted from the public tracking workflow.")
     return [r for r in repos if r["owner"] == owner]
 
 
 def tree(owner, repo, branch):
     data = gh_json(f"repos/{owner}/{repo}/git/trees/{branch}?recursive=1")
+    if data.get("truncated"):
+        raise RuntimeError("Repository tree was truncated; refusing an incomplete CI plan")
     return [e["path"] for e in data["tree"] if e["type"] == "blob"]
 
 
@@ -210,7 +219,13 @@ def plan(paths, files):
 
 def quote(value):
     """A YAML scalar, quoted only when needed."""
-    if re.fullmatch(r"[A-Za-z0-9_./-]+", value) and not re.fullmatch(r"[\d.]+", value):
+    if any(ord(character) < 32 for character in value):
+        raise RuntimeError("Workflow paths and branch names must not contain control characters")
+    if (
+        re.fullmatch(r"[A-Za-z0-9_./-]+", value)
+        and not re.fullmatch(r"[\d.]+", value)
+        and value.lower() not in {"true", "false", "yes", "no", "on", "off", "null"}
+    ):
         return value
     return "'" + value.replace("'", "''") + "'"
 
@@ -251,7 +266,7 @@ def render(jobs, branch):
                     f"            python-version: {quote(v)}",
                 ]
             lines += [
-                f"    uses: {WORKFLOWS}/python-ci.yml@v1",
+                f"    uses: {WORKFLOWS}/python-ci.yml@{WORKFLOW_REF}",
                 "    with:",
                 "      working-directory: ${{ matrix.directory }}",
                 "      python-version: ${{ matrix.python-version }}",
@@ -261,7 +276,7 @@ def render(jobs, branch):
             settings = (
                 [f"      working-directory: {quote(d)}"] if d != "." else []
             ) + ([f"      python-version: {quote(v)}"] if v != "3.11" else [])
-            lines += [f"    uses: {WORKFLOWS}/python-ci.yml@v1"] + (
+            lines += [f"    uses: {WORKFLOWS}/python-ci.yml@{WORKFLOW_REF}"] + (
                 ["    with:"] + settings if settings else []
             )
         lines.append("")
@@ -274,12 +289,12 @@ def render(jobs, branch):
                 "      fail-fast: false",
                 "      matrix:",
                 f"        directory: [{', '.join(quote(d) for d in dirs)}]",
-                f"    uses: {WORKFLOWS}/node-ci.yml@v1",
+                f"    uses: {WORKFLOWS}/node-ci.yml@{WORKFLOW_REF}",
                 "    with:",
                 "      working-directory: ${{ matrix.directory }}",
             ]
         else:
-            lines += [f"    uses: {WORKFLOWS}/node-ci.yml@v1"]
+            lines += [f"    uses: {WORKFLOWS}/node-ci.yml@{WORKFLOW_REF}"]
             if dirs[0] != ".":
                 lines += ["    with:", f"      working-directory: {quote(dirs[0])}"]
         lines.append("")
@@ -287,11 +302,11 @@ def render(jobs, branch):
         images = jobs["container"]
         lines += ["  container:", "    name: Docker image"]
         if images == [("Dockerfile", ".")]:
-            lines += [f"    uses: {WORKFLOWS}/container.yml@v1"]
+            lines += [f"    uses: {WORKFLOWS}/container.yml@{WORKFLOW_REF}"]
         elif len(images) == 1:
             ((dockerfile, context),) = images
             lines += [
-                f"    uses: {WORKFLOWS}/container.yml@v1",
+                f"    uses: {WORKFLOWS}/container.yml@{WORKFLOW_REF}",
                 "    with:",
                 f"      dockerfile: {quote(dockerfile)}",
                 f"      context: {quote(context)}",
@@ -309,26 +324,26 @@ def render(jobs, branch):
                     f"            context: {quote(context)}",
                 ]
             lines += [
-                f"    uses: {WORKFLOWS}/container.yml@v1",
+                f"    uses: {WORKFLOWS}/container.yml@{WORKFLOW_REF}",
                 "    with:",
                 "      dockerfile: ${{ matrix.dockerfile }}",
                 "      context: ${{ matrix.context }}",
             ]
         lines.append("")
     if "iac" in jobs:
-        dirs = ", ".join(f'"{d}"' for d in jobs["iac"])
+        dirs = quote(json.dumps(jobs["iac"]))
         lines += [
             "  iac:",
             "    name: Infrastructure as code",
-            f"    uses: {WORKFLOWS}/iac.yml@v1",
+            f"    uses: {WORKFLOWS}/iac.yml@{WORKFLOW_REF}",
             "    with:",
-            f"      directories: '[{dirs}]'",
+            f"      directories: {dirs}",
             "",
         ]
     lines += [
         "  repo-lint:",
         "    name: Repository lint",
-        f"    uses: {WORKFLOWS}/repo-lint.yml@v1",
+        f"    uses: {WORKFLOWS}/repo-lint.yml@{WORKFLOW_REF}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -358,7 +373,28 @@ def inspect(owner, repo):
         for p in paths
         if p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml"))
     ]
-    if any(SHARED_MARKER in read(owner, name, p, branch) for p in workflows):
+    calls = []
+    for path in workflows:
+        try:
+            workflow = yaml.safe_load(read(owner, name, path, branch)) or {}
+        except yaml.YAMLError as error:
+            raise RuntimeError(f"Invalid workflow YAML in {path}") from error
+        if not isinstance(workflow, dict):
+            raise RuntimeError(f"Workflow {path} must be a mapping")
+        jobs = workflow.get("jobs", {})
+        if not isinstance(jobs, dict):
+            raise RuntimeError(f"Workflow {path} jobs must be a mapping")
+        calls.extend(
+            job.get("uses", "")
+            for job in jobs.values()
+            if isinstance(job, dict) and isinstance(job.get("uses", ""), str)
+        )
+    shared = [call for call in calls if call.startswith(WORKFLOWS + "/")]
+    secured = any(
+        re.search(r"@v[2-9]\d*(?:\.\d+\.\d+)?$", call)
+        for call in shared
+    )
+    if secured and ".github/security-controls.json" in paths:
         return "covered", None
     for pr in gh_json(f"repos/{owner}/{name}/pulls?state=open&per_page=100") or []:
         if pr["head"]["ref"] == BRANCH or pr["title"].startswith(
@@ -378,6 +414,8 @@ def inspect(owner, repo):
     ]
     files = {p: read(owner, name, p, branch) for p in wanted}
     jobs = plan(paths, files)
+    if shared:
+        return "missing", {"security-only": True}
     if not jobs:
         return "no-code", None
     if ".github/workflows/ci.yml" in workflows:
@@ -403,23 +441,48 @@ def open_pr(owner, repo, jobs):
         if "Reference already exists" not in str(error):
             raise
     content = render(jobs, base)
-    gh(
-        "-X",
-        "PUT",
-        f"repos/{owner}/{name}/contents/.github/workflows/ci.yml",
-        payload={
-            "message": f"Run CI with the shared workflows\n\nAdds .github/workflows/ci.yml, which calls the shared "
-            f"{describe(jobs)} checks\nin {WORKFLOWS.split('/.github')[0]}.\n",
-            "content": base64.b64encode(content.encode()).decode(),
+    paths = tree(owner, name, BRANCH)
+    files = {}
+    if jobs.get("security-only"):
+        files[".github/workflows/security-baseline.yml"] = (
+            "name: Security baseline\non:\n  push:\n"
+            f"    branches: [{quote(base)}]\n"
+            "  pull_request:\n  workflow_dispatch:\n"
+            "  schedule:\n    - cron: '15 6 * * 1'\n"
+            "permissions:\n  contents: read\njobs:\n  security:\n"
+            f"    uses: {WORKFLOWS}/security.yml@{WORKFLOW_REF}\n"
+        )
+    else:
+        files[".github/workflows/ci.yml"] = content
+        files[".github/workflows/security-baseline.yml"] = (
+            "name: Scheduled security\non:\n  schedule:\n    - cron: '15 6 * * 1'\n"
+            "  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n  security:\n"
+            f"    uses: {WORKFLOWS}/security.yml@{WORKFLOW_REF}\n"
+        )
+    policy_path = ".github/security-controls.json"
+    if policy_path not in paths:
+        files[policy_path] = policy_template(owner)
+    for path, text in files.items():
+        payload = {
+            "message": "feat: add shared security CI\n\n"
+            "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+            "content": base64.b64encode(text.encode()).decode(),
             "branch": BRANCH,
-        },
-    )
+        }
+        if path in paths:
+            existing_file = gh_json(f"repos/{owner}/{name}/contents/{path}?ref={BRANCH}")
+            if base64.b64decode(existing_file["content"]).decode() == text:
+                continue
+            payload["sha"] = existing_file["sha"]
+        gh("-X", "PUT", f"repos/{owner}/{name}/contents/{path}", payload=payload)
     body = (
         f"Adds `.github/workflows/ci.yml`, which runs the shared checks from "
         f"[github-cicd-workflows](https://github.com/{WORKFLOWS.split('/.github')[0]}) on pushes to "
         f"`{base}` and on pull requests: {describe(jobs)}.\n\n"
         "Opened automatically by the daily repository check in github-cicd-workflows. Settings for "
         "stricter or custom checks are in its README.\n"
+        "\nSecurity controls are intentionally marked review-required. Complete their applicability "
+        "and negative-test evidence before merging; no application control is assumed safe.\n"
     )
     pr = gh_json(
         "-X",
@@ -435,10 +498,32 @@ def open_pr(owner, repo, jobs):
     return pr["html_url"]
 
 
+def policy_template(owner):
+    controls = (
+        "sql-injection xss csrf ssrf file-uploads path-traversal deserialization "
+        "authentication object-authorization server-permissions tenant-isolation "
+        "rate-limiting password-storage mfa sessions jwt row-level-security secrets "
+        "default-credentials cors webhook-signatures source-maps sensitive-data "
+        "cryptography security-headers resource-limits"
+    ).split()
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "owner": owner,
+            "test_command": "",
+            "controls": {control: {"status": "review-required"} for control in controls},
+        },
+        indent=2,
+    ) + "\n"
+
+
 def update_issue(this_repo, missing, own_ci, pr_open, failed):
     """Keeps one tracking issue up to date; closes it when everything is covered."""
     issues = gh_json(f"repos/{this_repo}/issues?state=open&labels={ISSUE_LABEL}") or []
     if not missing and not own_ci and not pr_open and not failed:
+        if os.environ.get("DRY_RUN") == "true":
+            print("Dry run: tracking issues would be closed; no changes made.")
+            return None
         for issue in issues:
             gh(
                 "-X",
@@ -510,8 +595,9 @@ def update_issue(this_repo, missing, own_ci, pr_open, failed):
                 "description": "Repositories to move onto the shared CI",
             },
         )
-    except RuntimeError:
-        pass  # the label already exists
+    except RuntimeError as error:
+        if "already_exists" not in str(error) and "already exists" not in str(error):
+            raise
     issue = gh_json(
         "-X",
         "POST",
@@ -524,6 +610,8 @@ def update_issue(this_repo, missing, own_ci, pr_open, failed):
 def main():
     owner, this_repo = os.environ["OWNER"], os.environ["THIS_REPO"]
     open_prs = os.environ.get("OPEN_PRS") == "true"
+    if open_prs:
+        gh_json(f"repos/{WORKFLOWS.split('/.github')[0]}/git/ref/tags/{WORKFLOW_REF}")
     repos = [
         r
         for r in list_repos(owner, include_private=open_prs)
@@ -564,7 +652,7 @@ def main():
         out.write(f"### Repository check\n\n{len(repos)} repositories: {summary}\n")
         if issue:
             out.write(f"\nTracking issue: {issue}\n")
-    return 1 if failed and not (missing or own_ci) and len(failed) == len(repos) else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

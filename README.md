@@ -1,5 +1,27 @@
 # GitHub CI/CD Workflows
 
+## v2 security and Semantic Versioning
+
+The v2 implementation adds a mandatory security baseline to every reusable CI
+workflow: full-history secret detection, OWASP/GitHub Actions static analysis,
+dependency/infrastructure gates, and application-specific security evidence.
+Read [SECURITY-CHECKLIST.md](SECURITY-CHECKLIST.md) for applicability, negative
+tests, exceptions, existing-repository migration, and limits of automated checks.
+
+This is a **major-version change**. Existing `@v1` consumers remain unchanged.
+After v2 is released, use `@v2`, an immutable exact version such as `@v2.0.0`,
+or a full release commit SHA. Consumers need `.github/security-controls.json`;
+onboarding creates a review-required policy rather than guessing application safety.
+Python/Node audits and container/IaC scans default to `enforce` in v2. The tables
+and examples below describe the legacy v1 contract where they say `report`/`@v1`.
+
+Release via the **SemVer release** workflow, not a force-pushed exact tag.
+Choose patch/minor/major and start with a dry run. Conventional Commit history
+determines the minimum bump; mandatory policy changes require major. The exact
+default-branch commit must pass the self-test before publication. Exact tags are
+create-only; only the corresponding major alias advances. The workflow library's
+SemVer is independent of each application's version.
+
 Reusable GitHub Actions workflows that run CI for all of my repositories, public and private.
 Each repository calls the workflows it needs with a few lines of YAML. The jobs run inside that
 repository, show up on its pull requests and use its own secrets, so nothing has to be copied
@@ -162,6 +184,12 @@ repositories that don't call these workflows yet:
 - **Repositories with their own `ci.yml`** are listed for review and never changed.
 - **Documentation-only repositories** are skipped.
 
+The v2 onboarding implementation also identifies actual v1 consumers and proposes
+a separate security workflow and review-required controls without replacing their
+existing CI. Automatic PR creation waits for the `v2` release tag to exist.
+Private repositories are omitted when the tracking host is public; use a private
+host for private onboarding so metadata is not exposed in public issues/logs.
+
 Everything it finds goes into one tracking issue labelled `ci-onboarding`, which closes itself once
 every repository is covered.
 
@@ -191,7 +219,7 @@ commit SHAs, and Dependabot keeps them current.
 To release a change after it is merged:
 
 ```bash
-git tag -f v1 && git push -f origin v1
+gh workflow run release.yml -f bump=major -f dry-run=true
 ```
 
 ## Testing

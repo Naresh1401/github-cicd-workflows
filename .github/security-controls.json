@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "owner": "Naresh1401",
+  "test_command": "",
+  "controls": {
+    "sql-injection": {"status": "not-applicable", "reason": "This repository has no database or application query execution."},
+    "xss": {"status": "not-applicable", "reason": "This repository does not render application HTML or serve a browser UI."},
+    "csrf": {"status": "not-applicable", "reason": "No application cookie-authenticated endpoints are implemented here."},
+    "ssrf": {"status": "not-applicable", "reason": "No application endpoint accepts user-controlled outbound request URLs."},
+    "file-uploads": {"status": "not-applicable", "reason": "No application upload endpoint or untrusted file-storage service exists."},
+    "path-traversal": {"status": "not-applicable", "reason": "No application filesystem endpoint; generated CI paths are regression-tested separately."},
+    "deserialization": {"status": "not-applicable", "reason": "No application deserialization endpoint; onboarding uses safe YAML loading."},
+    "authentication": {"status": "not-applicable", "reason": "Application user authentication is not implemented; GitHub authenticates CI users."},
+    "object-authorization": {"status": "not-applicable", "reason": "No application resource API; GitHub enforces repository object access."},
+    "server-permissions": {"status": "not-applicable", "reason": "No application server; CI permissions are declared in each workflow and scanned."},
+    "tenant-isolation": {"status": "not-applicable", "reason": "No multitenant application data; private repository metadata is not published to public tracking issues."},
+    "rate-limiting": {"status": "not-applicable", "reason": "No public application endpoints; GitHub API rate limits are provider-controlled."},
+    "password-storage": {"status": "not-applicable", "reason": "No application passwords are accepted, stored, or verified."},
+    "mfa": {"status": "not-applicable", "reason": "No application identity provider; GitHub account MFA is configured outside this codebase."},
+    "sessions": {"status": "not-applicable", "reason": "No application session cookies or session database exists."},
+    "jwt": {"status": "not-applicable", "reason": "No application JWT signing or validation implementation exists."},
+    "row-level-security": {"status": "not-applicable", "reason": "No application database or database authorization policy exists."},
+    "secrets": {"status": "not-applicable", "reason": "No application secret store; CI uses GitHub secrets and mandatory history scanning."},
+    "default-credentials": {"status": "not-applicable", "reason": "No application accounts or deployable default credentials exist."},
+    "cors": {"status": "not-applicable", "reason": "No browser-accessible application API is served by this repository."},
+    "webhook-signatures": {"status": "not-applicable", "reason": "No application webhook receiver; GitHub Actions events are provider-authenticated."},
+    "source-maps": {"status": "not-applicable", "reason": "No production browser bundles or source maps are published."},
+    "sensitive-data": {"status": "not-applicable", "reason": "No application personal-data processing; CI reports stay within the calling repository."},
+    "cryptography": {"status": "not-applicable", "reason": "No application cryptographic protocol; pinned dependency integrity uses standard SHA digests."},
+    "security-headers": {"status": "not-applicable", "reason": "No production HTTP server; fixture servers are isolated CI test targets."},
+    "resource-limits": {"status": "not-applicable", "reason": "No production application; workflow execution is bounded by job timeouts."}
+  }
+}

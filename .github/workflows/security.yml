@@ -1,0 +1,176 @@
+name: Security baseline
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Mandatory security baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      SEMGREP_SEND_METRICS: "off"
+      SEMGREP_ENABLE_VERSION_CHECK: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate application security evidence
+        run: |
+          python3 - <<'PY'
+          import datetime
+          import json
+          import pathlib
+          import subprocess
+          import sys
+
+          required = {
+              "sql-injection", "xss", "csrf", "ssrf", "file-uploads", "path-traversal",
+              "deserialization", "authentication", "object-authorization", "server-permissions",
+              "tenant-isolation", "rate-limiting", "password-storage", "mfa", "sessions",
+              "jwt", "row-level-security", "secrets", "default-credentials", "cors",
+              "webhook-signatures", "source-maps", "sensitive-data", "cryptography",
+              "security-headers", "resource-limits",
+          }
+          def fail(message):
+              print(f"::error::{message}")
+              sys.exit(1)
+
+          path = pathlib.Path(".github/security-controls.json")
+          try:
+              policy = json.loads(path.read_text())
+          except (OSError, ValueError) as error:
+              fail(f"Security controls are required: {error}")
+          if policy.get("schema_version") != 1 or not policy.get("owner", "").strip():
+              fail("Security controls require schema_version=1 and an accountable owner")
+          controls = policy.get("controls")
+          if not isinstance(controls, dict) or set(controls) != required:
+              fail("Security controls must cover every baseline control exactly once")
+          today = datetime.date.today()
+          tested = False
+          for name, control in controls.items():
+              if not isinstance(control, dict):
+                  fail(f"{name}: control must be an object")
+              status = control.get("status")
+              if status == "not-applicable":
+                  if len(control.get("reason", "").strip()) < 20:
+                      fail(f"{name}: non-applicability requires a substantive explanation")
+              elif status == "tested":
+                  tested = True
+                  evidence = control.get("evidence")
+                  if not isinstance(evidence, list) or not evidence:
+                      fail(f"{name}: tested controls require test-file evidence")
+                  for item in evidence:
+                      if not isinstance(item, str):
+                          fail(f"{name}: evidence must be a repository-relative path")
+                      evidence_path = pathlib.Path(item)
+                      if evidence_path.is_absolute() or ".." in evidence_path.parts or not evidence_path.is_file():
+                          fail(f"{name}: missing or invalid evidence path")
+              elif status == "exception":
+                  try:
+                      expires = datetime.date.fromisoformat(control.get("expires", ""))
+                  except (TypeError, ValueError):
+                      fail(f"{name}: exception requires an ISO expiry date")
+                  if not today <= expires <= today + datetime.timedelta(days=30):
+                      fail(f"{name}: exception expired or exceeds the 30-day limit")
+                  if not control.get("owner") or len(control.get("reason", "").strip()) < 20:
+                      fail(f"{name}: exception requires an owner and a substantive reason")
+                  print(f"::warning::{name} has a temporary exception until {expires}")
+              else:
+                  fail(f"{name}: review required; use tested, not-applicable, or exception")
+          command = policy.get("test_command", "")
+          if tested and (not isinstance(command, str) or not command.strip()):
+              fail("Applicable controls require a security test_command")
+          if command:
+              if not isinstance(command, str):
+                  fail("test_command must be a string")
+              subprocess.run(["bash", "-eo", "pipefail", "-c", command], check=True)
+          print("Security applicability and test evidence validated; declarations still require human review.")
+          PY
+
+      - name: Install pinned scanners
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-tools" "$RUNNER_TEMP/security-reports"
+          echo "SECURITY_REPORT_ID=$(cat /proc/sys/kernel/random/uuid)" >> "$GITHUB_ENV"
+          cd "$RUNNER_TEMP/security-tools"
+          base=https://github.com/gitleaks/gitleaks/releases/download/v8.30.1
+          curl --fail --silent --show-error --location "$base/gitleaks_8.30.1_linux_x64.tar.gz" -o gitleaks.tar.gz
+          curl --fail --silent --show-error --location "$base/gitleaks_8.30.1_checksums.txt" -o checksums.txt
+          checksum="$(awk '$2 == "gitleaks_8.30.1_linux_x64.tar.gz" { print $1 }' checksums.txt)"
+          test -n "$checksum"
+          printf '%s  gitleaks.tar.gz\n' "$checksum" | sha256sum --check -
+          tar -xzf gitleaks.tar.gz gitleaks
+          printf '[extend]\nuseDefault = true\n' > gitleaks.toml
+          echo "$RUNNER_TEMP/security-tools" >> "$GITHUB_PATH"
+          pipx install semgrep==1.180.0
+
+      - name: Detect secrets in the complete Git history
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .gitleaksignore ]; then
+            echo "::error::Repository-wide secret suppressions are not accepted by the mandatory baseline."
+            exit 1
+          fi
+          gitleaks git . --log-opts=--all --redact --ignore-gitleaks-allow \
+            --config "$RUNNER_TEMP/security-tools/gitleaks.toml" \
+            --report-format json --report-path "$RUNNER_TEMP/security-reports/secrets.json"
+
+      - name: Static analysis for OWASP application risks
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f .semgrepignore ]; then
+            echo "::error::Repository-wide SAST suppressions are not accepted by the mandatory baseline."
+            exit 1
+          fi
+          semgrep scan --config p/owasp-top-ten --config p/secrets --config p/github-actions \
+            --metrics=off --disable-version-check --oss-only --disable-nosem \
+            --no-git-ignore --severity ERROR --error --strict \
+            --sarif --output "$RUNNER_TEMP/security-reports/sast.sarif" .
+
+      - name: Dependencies and infrastructure security
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.75.0
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          trivyignores: ""
+          format: json
+          output: ${{ runner.temp }}/security-reports/dependencies-config.json
+          exit-code: "1"
+        env:
+          TRIVY_IGNORE_FILE: /dev/null
+
+      - name: Retain security evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-${{ env.SECURITY_REPORT_ID }}
+          path: ${{ runner.temp }}/security-reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Explain baseline outcome
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "### Security baseline: $STATUS"
+            echo "History secrets, high-severity SAST, high/critical dependencies and infrastructure, and application security evidence."
+            echo "Scanner failures fail the gate. A pass is not proof of application security; review applicable negative tests."
+          } >> "$GITHUB_STEP_SUMMARY"

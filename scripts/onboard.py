@@ -74,19 +74,15 @@ def list_repos(owner, include_private):
         for line in gh("--paginate", path, "--jq", jq).splitlines()
         if line
     ]
-    public_tracker = not gh_json(f"repos/{this_repo}")["private"]
-    if public_tracker:
-        private_count = sum(repo["private"] for repo in repos)
-        repos = [repo for repo in repos if not repo["private"]]
-        if private_count:
-            print(f"{private_count} private repositories omitted from the public tracking workflow.")
     return [r for r in repos if r["owner"] == owner]
 
 
 def tree(owner, repo, branch):
     data = gh_json(f"repos/{owner}/{repo}/git/trees/{branch}?recursive=1")
     if data.get("truncated"):
-        raise RuntimeError("Repository tree was truncated; refusing an incomplete CI plan")
+        raise RuntimeError(
+            "Repository tree was truncated; refusing an incomplete CI plan"
+        )
     return [e["path"] for e in data["tree"] if e["type"] == "blob"]
 
 
@@ -220,7 +216,9 @@ def plan(paths, files):
 def quote(value):
     """A YAML scalar, quoted only when needed."""
     if any(ord(character) < 32 for character in value):
-        raise RuntimeError("Workflow paths and branch names must not contain control characters")
+        raise RuntimeError(
+            "Workflow paths and branch names must not contain control characters"
+        )
     if (
         re.fullmatch(r"[A-Za-z0-9_./-]+", value)
         and not re.fullmatch(r"[\d.]+", value)
@@ -331,6 +329,12 @@ def render(jobs, branch):
             ]
         lines.append("")
     if "iac" in jobs:
+        if any(
+            ord(character) < 32
+            for directory in jobs["iac"]
+            for character in directory
+        ):
+            raise RuntimeError("Workflow paths must not contain control characters")
         dirs = quote(json.dumps(jobs["iac"]))
         lines += [
             "  iac:",
@@ -391,7 +395,7 @@ def inspect(owner, repo):
         )
     shared = [call for call in calls if call.startswith(WORKFLOWS + "/")]
     secured = any(
-        re.search(r"@v[2-9]\d*(?:\.\d+\.\d+)?$", call)
+        re.search(r"@v(?:[2-9]|[1-9]\d+)(?:\.\d+\.\d+)?$", call)
         for call in shared
     )
     if secured and ".github/security-controls.json" in paths:
@@ -470,7 +474,9 @@ def open_pr(owner, repo, jobs):
             "branch": BRANCH,
         }
         if path in paths:
-            existing_file = gh_json(f"repos/{owner}/{name}/contents/{path}?ref={BRANCH}")
+            existing_file = gh_json(
+                f"repos/{owner}/{name}/contents/{path}?ref={BRANCH}"
+            )
             if base64.b64decode(existing_file["content"]).decode() == text:
                 continue
             payload["sha"] = existing_file["sha"]
@@ -506,15 +512,20 @@ def policy_template(owner):
         "default-credentials cors webhook-signatures source-maps sensitive-data "
         "cryptography security-headers resource-limits"
     ).split()
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "owner": owner,
-            "test_command": "",
-            "controls": {control: {"status": "review-required"} for control in controls},
-        },
-        indent=2,
-    ) + "\n"
+    return (
+        json.dumps(
+            {
+                "schema_version": 1,
+                "owner": owner,
+                "test_command": "",
+                "controls": {
+                    control: {"status": "review-required"} for control in controls
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def update_issue(this_repo, missing, own_ci, pr_open, failed):
@@ -618,6 +629,13 @@ def main():
         if f"{owner}/{r['name']}" != this_repo
     ]
     missing, own_ci, pr_open, failed, counts = [], [], [], [], {}
+    if not gh_json(f"repos/{this_repo}")["private"]:
+        private_count = sum(repo["private"] for repo in repos)
+        repos = [repo for repo in repos if not repo["private"]]
+        if private_count:
+            print(
+                f"{private_count} private repositories omitted from the public tracking workflow."
+            )
     for repo in repos:
         try:
             status, jobs = inspect(owner, repo)

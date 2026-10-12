@@ -148,20 +148,28 @@ def test_workflow_paths_cannot_inject_yaml():
 
 
 def test_comment_is_not_a_shared_workflow_call(monkeypatch):
-    monkeypatch.setattr(onboard, "tree", lambda *args: [".github/workflows/ci.yml", "app.py"])
     monkeypatch.setattr(
-        onboard, "read", lambda *args: "# github-cicd-workflows/.github/workflows/\njobs: {}"
+        onboard, "tree", lambda *args: [".github/workflows/ci.yml", "app.py"]
+    )
+    monkeypatch.setattr(
+        onboard,
+        "read",
+        lambda *args: "# github-cicd-workflows/.github/workflows/\njobs: {}",
     )
     monkeypatch.setattr(onboard, "gh_json", lambda *args: [])
     assert onboard.inspect("o", {"name": "r", "branch": "main"})[0] == "own-ci"
 
 
 def test_v1_consumer_needs_security_migration(monkeypatch):
-    monkeypatch.setattr(onboard, "tree", lambda *args: [".github/workflows/ci.yml", "app.py"])
+    monkeypatch.setattr(
+        onboard, "tree", lambda *args: [".github/workflows/ci.yml", "app.py"]
+    )
     monkeypatch.setattr(
         onboard,
         "read",
-        lambda *args: "jobs:\n  python:\n    uses: " + onboard.WORKFLOWS + "/python-ci.yml@v1",
+        lambda *args: (
+            "jobs:\n  python:\n    uses: " + onboard.WORKFLOWS + "/python-ci.yml@v1"
+        ),
     )
     monkeypatch.setattr(onboard, "gh_json", lambda *args: [])
     assert onboard.inspect("o", {"name": "r", "branch": "main"}) == (
@@ -175,7 +183,8 @@ def test_retry_updates_existing_file_with_its_sha(monkeypatch):
     path = ".github/workflows/ci.yml"
     monkeypatch.setattr(onboard, "tree", lambda *args: [path])
 
-    def fake_json(endpoint, **kwargs):
+    def fake_json(*args, **kwargs):
+        endpoint = args[-1]
         if endpoint.endswith("/git/ref/heads/main"):
             return {"object": {"sha": "base"}}
         if "/contents/" in endpoint:
@@ -185,7 +194,9 @@ def test_retry_updates_existing_file_with_its_sha(monkeypatch):
         return []
 
     monkeypatch.setattr(onboard, "gh_json", fake_json)
-    monkeypatch.setattr(onboard, "gh", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        onboard, "gh", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
     onboard.open_pr("o", {"name": "r", "branch": "main"}, {"python": [(".", "3.11")]})
     updates = [kwargs["payload"] for args, kwargs in calls if path in args[-1]]
     assert updates[0]["sha"] == "file-sha"
@@ -194,5 +205,18 @@ def test_retry_updates_existing_file_with_its_sha(monkeypatch):
 def test_dry_run_never_closes_tracking_issues(monkeypatch):
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setattr(onboard, "gh_json", lambda *args: [{"number": 1}])
-    monkeypatch.setattr(onboard, "gh", lambda *args, **kwargs: pytest.fail("unexpected write"))
+    monkeypatch.setattr(
+        onboard, "gh", lambda *args, **kwargs: pytest.fail("unexpected write")
+    )
     assert onboard.update_issue("o/r", [], [], [], []) is None
+
+
+def test_public_repository_listing_does_not_need_tracker_metadata(monkeypatch):
+    monkeypatch.setattr(
+        onboard,
+        "gh",
+        lambda *args: json.dumps(
+            {"name": "r", "private": False, "branch": "main", "owner": "o"}
+        ),
+    )
+    assert onboard.list_repos("o", False)[0]["name"] == "r"

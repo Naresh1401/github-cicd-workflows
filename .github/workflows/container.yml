@@ -72,7 +72,10 @@ jobs:
         env:
           SCAN: ${{ inputs.scan }}
         run: |
-          case "$SCAN" in report|enforce|off) ;; *) echo "::error::scan must be report, enforce or off (got '$SCAN')"; exit 1 ;; esac
+          case "$SCAN" in
+            report|enforce|off) ;;
+            *) echo "::error::scan must be report, enforce or off (got '$SCAN')"; exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

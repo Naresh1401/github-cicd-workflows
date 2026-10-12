@@ -47,12 +47,17 @@ jobs:
               print(f"::error::{message}")
               sys.exit(1)
 
+          def text(value):
+              return isinstance(value, str) and bool(value.strip())
+
           path = pathlib.Path(".github/security-controls.json")
           try:
               policy = json.loads(path.read_text())
           except (OSError, ValueError) as error:
               fail(f"Security controls are required: {error}")
-          if policy.get("schema_version") != 1 or not policy.get("owner", "").strip():
+          if not isinstance(policy, dict):
+              fail("Security controls must be a JSON object")
+          if type(policy.get("schema_version")) is not int or policy["schema_version"] != 1 or not text(policy.get("owner")):
               fail("Security controls require schema_version=1 and an accountable owner")
           controls = policy.get("controls")
           if not isinstance(controls, dict) or set(controls) != required:
@@ -64,7 +69,7 @@ jobs:
                   fail(f"{name}: control must be an object")
               status = control.get("status")
               if status == "not-applicable":
-                  if len(control.get("reason", "").strip()) < 20:
+                  if not text(control.get("reason")) or len(control["reason"].strip()) < 20:
                       fail(f"{name}: non-applicability requires a substantive explanation")
               elif status == "tested":
                   tested = True
@@ -84,7 +89,7 @@ jobs:
                       fail(f"{name}: exception requires an ISO expiry date")
                   if not today <= expires <= today + datetime.timedelta(days=30):
                       fail(f"{name}: exception expired or exceeds the 30-day limit")
-                  if not control.get("owner") or len(control.get("reason", "").strip()) < 20:
+                  if not text(control.get("owner")) or not text(control.get("reason")) or len(control["reason"].strip()) < 20:
                       fail(f"{name}: exception requires an owner and a substantive reason")
                   print(f"::warning::{name} has a temporary exception until {expires}")
               else:
@@ -140,6 +145,7 @@ jobs:
             --metrics=off --disable-version-check --oss-only --disable-nosem \
             --exclude .git --exclude node_modules --exclude .venv --exclude venv \
             --exclude '**/templates/*.yaml' --exclude '**/templates/*.yml' \
+            --exclude '**/templates/**/*.yaml' --exclude '**/templates/**/*.yml' \
             --no-git-ignore --severity ERROR --error --strict \
             --sarif --output "$RUNNER_TEMP/security-reports/sast.sarif" .
 

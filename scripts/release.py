@@ -47,7 +47,11 @@ def required_bump(messages):
         for message in messages
     ):
         return "major"
-    return "minor" if any(re.match(r"feat(?:\([^)]+\))?:", m) for m in messages) else "patch"
+    return (
+        "minor"
+        if any(re.match(r"feat(?:\([^)]+\))?:", m) for m in messages)
+        else "patch"
+    )
 
 
 def publish(repo, sha, bump, dry_run):
@@ -61,7 +65,9 @@ def publish(repo, sha, bump, dry_run):
         for ref in refs
         if parse_version(ref["ref"].removeprefix("refs/tags/")) is not None
     ]
-    current, _ = max(versions, key=lambda entry: entry[0]) if versions else ((0, 0, 0), None)
+    current, _ = (
+        max(versions, key=lambda entry: entry[0]) if versions else ((0, 0, 0), None)
+    )
     previous = "v" + ".".join(map(str, current))
     messages = (
         [
@@ -81,7 +87,9 @@ def publish(repo, sha, bump, dry_run):
     tag = "v" + ".".join(map(str, version))
     alias = f"v{version[0]}"
     # A successful run at the exact commit is required, not the branch's last green run.
-    runs = api(f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100")["workflow_runs"]
+    runs = api(f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100")[
+        "workflow_runs"
+    ]
     if not any(
         run["path"] == ".github/workflows/self-test.yml"
         and run["head_sha"] == sha
@@ -89,13 +97,21 @@ def publish(repo, sha, bump, dry_run):
         and run["event"] in {"push", "workflow_dispatch"}
         for run in runs
     ):
-        raise ValueError("The exact release commit needs a successful default-branch self-test")
+        raise ValueError(
+            "The exact release commit needs a successful default-branch self-test"
+        )
     notes = api(
         f"repos/{repo}/releases/generate-notes",
         "POST",
-        {"tag_name": tag, "target_commitish": sha, **({"previous_tag_name": previous} if versions else {})},
+        {
+            "tag_name": tag,
+            "target_commitish": sha,
+            **({"previous_tag_name": previous} if versions else {}),
+        },
     )
-    print(f"{'Dry run' if dry_run else 'Release'}: {previous} -> {tag}, {alias} -> {sha}")
+    print(
+        f"{'Dry run' if dry_run else 'Release'}: {previous} -> {tag}, {alias} -> {sha}"
+    )
     if dry_run:
         return tag
     # Exact tags are create-only. Never force-update them, even during retries.

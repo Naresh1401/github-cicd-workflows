@@ -90,7 +90,9 @@ def test_release_preserves_v1_and_creates_exact_tag_before_alias(monkeypatch):
     ("sha", "bump", "green"),
     [("stale", "major", True), ("abc", "patch", True), ("abc", "major", False)],
 )
-def test_release_refuses_stale_commits_breaking_patch_and_failed_ci(monkeypatch, sha, bump, green):
+def test_release_refuses_stale_commits_breaking_patch_and_failed_ci(
+    monkeypatch, sha, bump, green
+):
     api, writes = fake_api(green=green)
     monkeypatch.setattr("release.api", api)
     with pytest.raises(ValueError):

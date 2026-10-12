@@ -8,10 +8,18 @@ on:
   schedule:
     - cron: "30 9 * * *"
   workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Inspect existing repositories without writing issues or PRs.
+        type: boolean
+        default: true
+      open-prs:
+        description: Propose onboarding/migration PRs (requires ONBOARDING_TOKEN and a v2 release).
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: check-repos
@@ -23,6 +31,9 @@ jobs:
 
   check:
     needs: security
+    permissions:
+      contents: read
+      issues: write
     name: Find repositories without the shared CI
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -42,7 +53,8 @@ jobs:
       - name: Check repositories
         env:
           GH_TOKEN: ${{ secrets.ONBOARDING_TOKEN || github.token }}
-          OPEN_PRS: ${{ secrets.ONBOARDING_TOKEN != '' }}
+          OPEN_PRS: ${{ secrets.ONBOARDING_TOKEN != '' && (inputs.open-prs || (github.event_name == 'schedule' && vars.ENABLE_SECURITY_ONBOARDING == 'true')) }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
           OWNER: ${{ github.repository_owner }}
           THIS_REPO: ${{ github.repository }}
         run: python scripts/onboard.py

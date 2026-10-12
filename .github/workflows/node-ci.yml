@@ -61,7 +61,10 @@ jobs:
         env:
           AUDIT: ${{ inputs.audit }}
         run: |
-          case "$AUDIT" in report|enforce|off) ;; *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;; esac
+          case "$AUDIT" in
+            report|enforce|off) ;;
+            *) echo "::error::audit must be report, enforce or off (got '$AUDIT')"; exit 1 ;;
+          esac
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

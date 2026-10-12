@@ -112,6 +112,9 @@ self-certify security without an independent review.
 - Onboarding parses actual job calls, identifies v1 consumers without v2 coverage,
   and proposes a separate security workflow without overwriting their existing CI.
 - New policies start `review-required`; owners must complete them before merging.
+- Manual repository checks default to dry-run. Scheduled migration PRs require
+  `ENABLE_SECURITY_ONBOARDING=true` plus `ONBOARDING_TOKEN`; enabling a new major
+  baseline does not silently open PRs in every repository.
 - Public tracking workflows omit private repositories to avoid publishing their
   names, code layouts or PR links. Run private onboarding from a private host.
 - Repository owners must require the security status checks and independent

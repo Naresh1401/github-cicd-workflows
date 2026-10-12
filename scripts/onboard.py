@@ -20,6 +20,7 @@ import posixpath
 import re
 import subprocess
 import sys
+from functools import cache
 
 import yaml
 
@@ -402,6 +403,36 @@ def describe(jobs):
 # ── Onboarding ──────────────────────────────────────────────────────────
 
 
+@cache
+def released_security_shas():
+    repository = WORKFLOWS.split("/.github")[0]
+    releases = gh_json(f"repos/{repository}/releases?per_page=100")
+    return {
+        gh_json(f"repos/{repository}/commits/{release['tag_name']}")["sha"]
+        for release in releases
+        if not release["draft"]
+        and not release["prerelease"]
+        and re.fullmatch(r"v(?:[2-9]|[1-9]\d+)\.\d+\.\d+", release["tag_name"])
+    }
+
+
+def secure_call(call):
+    workflow, _, ref = call.partition("@")
+    if workflow.removeprefix(WORKFLOWS + "/") not in {
+        "security.yml",
+        "python-ci.yml",
+        "node-ci.yml",
+        "container.yml",
+        "iac.yml",
+        "helm.yml",
+        "repo-lint.yml",
+    }:
+        return False
+    if re.fullmatch(r"v(?:[2-9]|[1-9]\d+)(?:\.\d+\.\d+)?", ref):
+        return True
+    return bool(re.fullmatch(r"[0-9a-f]{40}", ref)) and ref in released_security_shas()
+
+
 def inspect(owner, repo):
     """(status, details) for one repository."""
     name, branch = repo["name"], repo["branch"]
@@ -428,9 +459,7 @@ def inspect(owner, repo):
             if isinstance(job, dict) and isinstance(job.get("uses", ""), str)
         )
     shared = [call for call in calls if call.startswith(WORKFLOWS + "/")]
-    secured = any(
-        re.search(r"@v(?:[2-9]|[1-9]\d+)(?:\.\d+\.\d+)?$", call) for call in shared
-    )
+    secured = any(secure_call(call) for call in shared)
     if secured and ".github/security-controls.json" in paths:
         return "covered", None
     for pr in gh_json(f"repos/{owner}/{name}/pulls?state=open&per_page=100") or []:

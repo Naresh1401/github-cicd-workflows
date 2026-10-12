@@ -228,3 +228,11 @@ def test_public_repository_listing_does_not_need_tracker_metadata(monkeypatch):
 )
 def test_other_language_and_helm_repositories_receive_security(path):
     assert jobs_for([path]) == {"security-only": True}
+
+
+def test_published_security_sha_pins_are_recognized(monkeypatch):
+    sha = "a" * 40
+    monkeypatch.setattr(onboard, "released_security_shas", lambda: {sha})
+    assert onboard.secure_call(onboard.WORKFLOWS + "/security.yml@" + sha)
+    assert not onboard.secure_call(onboard.WORKFLOWS + "/nonexistent.yml@v2")
+    assert not onboard.secure_call(onboard.WORKFLOWS + "/security.yml@v1")
